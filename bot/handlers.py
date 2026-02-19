@@ -8,7 +8,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 from db import db
-from config import PROJECT_NAME, PROJECT_TAGLINE
+from config import PROJECT_NAME, PROJECT_TAGLINE, ADMINS
+from parsers.scheduler import run_parse
 
 router = Router()
 
@@ -396,6 +397,7 @@ async def cmd_help(message: types.Message):
         "/stats - Общая статистика\n"
         "/compare - Сравнение с другим бегуном\n"
         "/addrace - Предложить забег\n"
+        "/calendar - Календарь забегов\n"
         "/delete - Удалить мои данные\n"
         "/help - Эта справка\n\n"
         "📱 **Кнопки:**\n"
@@ -438,6 +440,32 @@ async def cmd_calendar(message: types.Message):
         )
 
     await message.answer(response)
+
+
+# ============================================
+# КОМАНДА /parse - Парсинг забегов (админ)
+# ============================================
+@router.message(Command("parse"))
+async def cmd_parse(message: types.Message):
+    """Ручной запуск парсинга забегов (только для админов)"""
+    if message.from_user.id not in ADMINS or ADMINS[0] == 0:
+        await message.answer("⚠️ Эта команда доступна только администраторам.")
+        return
+
+    await message.answer("🔄 Запускаю парсинг забегов...\n\nЭто может занять несколько минут.")
+
+    try:
+        results = await run_parse()
+        total = sum(results.values())
+
+        response = "✅ **Парсинг завершён!**\n\n"
+        for source, count in results.items():
+            response += f"• {source}: {count} забегов\n"
+        response += f"\n📊 Всего добавлено: {total}"
+
+        await message.answer(response)
+    except Exception as e:
+        await message.answer(f"❌ Ошибка парсинга: {e}")
 
 
 # ============================================

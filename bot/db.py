@@ -229,6 +229,41 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    async def get_race_by_url(self, url: str) -> Optional[Dict]:
+        """Получить забег по URL (для проверки на дубликат)"""
+        if not url:
+            return None
+        async with self.db.execute(
+            "SELECT * FROM races WHERE website_url = ?",
+            (url,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def add_race(
+        self,
+        name: str,
+        date: str,
+        location: str = '',
+        organizer: str = '',
+        race_type: str = 'шоссе',
+        distances: str = '[]',
+        website_url: str = '',
+        protocol_url: str = '',
+        source: str = '',
+    ) -> int:
+        """Добавить новый забег"""
+        cursor = await self.db.execute(
+            """
+            INSERT INTO races 
+            (name, date, location, organizer, race_type, distances, website_url, protocol_url, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (name, date, location, organizer, race_type, distances, website_url, protocol_url)
+        )
+        await self.db.commit()
+        return cursor.lastrowid
+
     # ============================================
     # РЕЗУЛЬТАТЫ (RESULTS)
     # ============================================
