@@ -5,6 +5,11 @@ import aiosqlite
 from typing import Optional, List, Dict, Any
 from datetime import date
 import os
+import sys
+
+# Исправление кодировки для Windows
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "seido.db")
 
@@ -18,13 +23,13 @@ class Database:
         self.db = await aiosqlite.connect(DB_PATH)
         self.db.row_factory = aiosqlite.Row
         await self.init_db()
-        print("✅ Подключение к базе данных установлено")
+        print("[OK] Подключение к базе данных установлено")
 
     async def disconnect(self):
         """Отключение от базы данных"""
         if self.db:
             await self.db.close()
-            print("❌ Подключение к базе данных закрыто")
+            print("[OK] Подключение к базе данных закрыто")
 
     async def init_db(self):
         """Инициализация таблиц"""
