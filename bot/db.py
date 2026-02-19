@@ -408,6 +408,33 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid
 
+    # ============================================
+    # УДАЛЕНИЕ ДАННЫХ
+    # ============================================
+
+    async def delete_runner(self, runner_id: int) -> bool:
+        """Удалить бегуна и все его данные"""
+        # Удаляем результаты
+        await self.db.execute(
+            "DELETE FROM results WHERE runner_id = ?",
+            (runner_id,)
+        )
+        
+        # Удаляем подписки
+        await self.db.execute(
+            "DELETE FROM race_subscriptions WHERE runner_id = ?",
+            (runner_id,)
+        )
+        
+        # Удаляем профиль
+        await self.db.execute(
+            "DELETE FROM runners WHERE id = ?",
+            (runner_id,)
+        )
+        
+        await self.db.commit()
+        return True
+
 
 # Глобальный экземпляр
 db = Database()

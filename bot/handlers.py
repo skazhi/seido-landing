@@ -44,6 +44,24 @@ def get_gender_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
+def get_consent_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура согласия на обработку ПДн"""
+    keyboard = [
+        [KeyboardButton(text="✅ Принять")],
+        [KeyboardButton(text="❌ Отмена")],
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+
+def get_delete_confirmation_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура подтверждения удаления"""
+    keyboard = [
+        [KeyboardButton(text="✅ Удалить")],
+        [KeyboardButton(text="❌ Отмена")],
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+
 # ============================================
 # КОМАНДА /start
 # ============================================
@@ -51,7 +69,7 @@ def get_gender_keyboard() -> ReplyKeyboardMarkup:
 async def cmd_start(message: types.Message, state: FSMContext):
     """Приветствие и регистрация"""
     user = await db.get_runner_by_telegram_id(message.from_user.id)
-    
+
     if user:
         # Пользователь уже зарегистрирован
         await message.answer(
@@ -61,7 +79,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             reply_markup=get_main_keyboard()
         )
     else:
-        # Новая регистрация
+        # Запрос согласия на обработку ПДн
         await message.answer(
             f"👋 Привет! Я бот {PROJECT_NAME}.\n\n"
             f"{PROJECT_TAGLINE}\n\n"
@@ -70,10 +88,48 @@ async def cmd_start(message: types.Message, state: FSMContext):
             "• Смотреть личные рекорды на любых дистанциях\n"
             "• Сравнивать себя с другими бегунами\n"
             "• Следить за предстоящими забегами\n\n"
-            "Давай зарегистрируемся! Как тебя зовут?\n"
-            "Напиши фамилию и имя (например: Иванов Иван)"
+            "─────────────────────────────\n\n"
+            "📋 **Перед регистрацией — важное соглашение**\n\n"
+            "Нажимая «✅ Принять», вы даёте согласие на обработку "
+            "ваших персональных данных:\n\n"
+            "• Фамилия, имя, дата рождения\n"
+            "• Город проживания\n"
+            "• Спортивные результаты на забегах\n\n"
+            "**Цель обработки**:\n"
+            "✅ Сохранение ваших результатов в истории\n"
+            "✅ Поиск ваших результатов по фамилии\n"
+            "✅ Формирование статистики и рейтингов\n\n"
+            "**Ваши права**:\n"
+            "📌 Вы можете запросить удаление всех данных в любой момент\n"
+            "📌 Вы можете отозвать согласие через поддержку\n"
+            "📌 Данные не передаются третьим лицам\n\n"
+            "Полная версия: https://skazhi.github.io/seido-landing/docs/offer.md",
+            reply_markup=get_consent_keyboard()
         )
-        await state.set_state(Registration.waiting_for_name)
+        await state.set_state('waiting_for_consent')
+
+
+@router.message(F.text == "✅ Принять")
+async def process_consent(message: types.Message, state: FSMContext):
+    """Обработка согласия"""
+    await state.update_data(consent_given=True)
+    
+    await message.answer(
+        "✅ Спасибо! Теперь давайте зарегистрируемся.\n\n"
+        "Как тебя зовут?\n"
+        "Напиши фамилию и имя (например: Иванов Иван)"
+    )
+    await state.set_state(Registration.waiting_for_name)
+
+
+@router.message(F.text == "❌ Отмена")
+async def cancel_consent(message: types.Message, state: FSMContext):
+    """Отказ от согласия"""
+    await state.clear()
+    await message.answer(
+        "❌ Понимаем. Без согласия мы не можем обрабатывать ваши данные.\n\n"
+        "Если передумаете — просто напишите /start"
+    )
 
 
 # ============================================
@@ -340,6 +396,7 @@ async def cmd_help(message: types.Message):
         "/stats - Общая статистика\n"
         "/compare - Сравнение с другим бегуном\n"
         "/addrace - Предложить забег\n"
+        "/delete - Удалить мои данные\n"
         "/help - Эта справка\n\n"
         "📱 **Кнопки:**\n"
         "📊 Мои результаты - показать твои результаты\n"
@@ -348,7 +405,10 @@ async def cmd_help(message: types.Message):
         "📅 Календарь - предстоящие забеги\n"
         "➕ Добавить забег - предложить новый забег\n"
         "❓ Помощь - эта справка\n\n"
-        "💡 Есть вопросы или идеи? Пиши создателю: @VovaSkazhi"
+        "🔒 **Конфиденциальность:**\n"
+        "Ваши данные защищены. Вы можете удалить их в любой момент командой /delete.\n\n"
+        "Полная политика: https://skazhi.github.io/seido-landing/docs/offer.md\n\n"
+        "💡 Есть вопросы или идеи? Пиши создателю: @Skazhi"
     )
 
 
@@ -359,16 +419,16 @@ async def cmd_help(message: types.Message):
 async def cmd_calendar(message: types.Message):
     """Календарь предстоящих забегов"""
     races = await db.get_upcoming_races(limit=5)
-    
+
     if not races:
         await message.answer(
             "📅 Календарь забегов скоро появится!\n\n"
             "Мы собираем информацию о предстоящих стартах."
         )
         return
-    
+
     response = "📅 **Предстоящие забеги:**\n\n"
-    
+
     for race in races:
         response += (
             f"🏁 **{race['name']}**\n"
@@ -376,5 +436,53 @@ async def cmd_calendar(message: types.Message):
             f"📍 {race['location'] or 'Точное место уточняется'}\n"
             f"🏢 Организатор: {race['organizer'] or 'Не указан'}\n\n"
         )
-    
+
     await message.answer(response)
+
+
+# ============================================
+# КОМАНДА /delete - Удаление данных
+# ============================================
+@router.message(Command("delete"))
+async def cmd_delete(message: types.Message, state: FSMContext):
+    """Удаление всех данных пользователя"""
+    user = await db.get_runner_by_telegram_id(message.from_user.id)
+
+    if not user:
+        await message.answer("⚠️ У нас нет ваших данных. Сначала зарегистрируйтесь: /start")
+        return
+
+    await message.answer(
+        "⚠️ **Вы уверены?**\n\n"
+        "Это действие удалит:\n"
+        "• Ваш профиль\n"
+        "• Все ваши результаты\n"
+        "• Подписки на забеги\n\n"
+        "Восстановить данные будет невозможно.\n\n"
+        "Нажмите «✅ Удалить» для подтверждения или «❌ Отмена»",
+        reply_markup=get_delete_confirmation_keyboard()
+    )
+    await state.set_state('waiting_for_delete_confirm')
+
+
+@router.message(F.text == "✅ Удалить")
+async def confirm_delete(message: types.Message, state: FSMContext):
+    """Подтверждение удаления"""
+    user = await db.get_runner_by_telegram_id(message.from_user.id)
+    
+    if user:
+        await db.delete_runner(user['id'])
+    
+    await state.clear()
+    
+    await message.answer(
+        "✅ Ваши данные удалены из базы.\n\n"
+        "Если захотите вернуться — напишите /start"
+    )
+
+
+@router.message(F.text == "❌ Отмена")
+async def cancel_delete(message: types.Message, state: FSMContext):
+    """Отмена удаления"""
+    await state.clear()
+    await message.answer("✅ Удаление отменено. Ваши данные сохранены.")
