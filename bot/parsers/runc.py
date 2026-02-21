@@ -9,13 +9,14 @@ from .base import RaceParser
 logger = logging.getLogger(__name__)
 
 # Известные события Беговое сообщество (RunC) на 2026
+# protocol_slug: слаг для results.runc.run/event/{slug}/overview/
 RUNC_EVENTS_2026 = [
-    {'name': 'Соревнования «Скорость»', 'date': '2026-02-21', 'location': 'Москва', 'url': 'https://speedrace.runc.run/'},
-    {'name': 'Забег «Апрель»', 'date': '2026-04-05', 'location': 'Москва', 'url': 'https://aprilrun5km.runc.run/'},
-    {'name': 'Детский забег', 'date': '2026-04-25', 'location': 'Москва', 'url': 'https://kids.runc.run/'},
-    {'name': 'Московский полумарафон', 'date': '2026-04-26', 'location': 'Москва', 'url': 'https://moscowhalf.runc.run/'},
-    {'name': 'Московский марафон', 'date': '2026-10-11', 'location': 'Москва', 'url': 'https://moscowmarathon.runc.run/'},
-    {'name': 'Марафон «Белые ночи»', 'date': '2026-06-28', 'location': 'Санкт-Петербург', 'url': 'https://whitenightsmarathon.ru/'},
+    {'name': 'Соревнования «Скорость»', 'date': '2026-02-21', 'location': 'Москва', 'url': 'https://speedrace.runc.run/', 'protocol_slug': 'speedrace'},
+    {'name': 'Забег «Апрель»', 'date': '2026-04-05', 'location': 'Москва', 'url': 'https://aprilrun5km.runc.run/', 'protocol_slug': 'aprilrun5km'},
+    {'name': 'Детский забег', 'date': '2026-04-25', 'location': 'Москва', 'url': 'https://kids.runc.run/', 'protocol_slug': 'kids'},
+    {'name': 'Московский полумарафон', 'date': '2026-04-26', 'location': 'Москва', 'url': 'https://moscowhalf.runc.run/', 'protocol_slug': 'moscow_half'},
+    {'name': 'Московский марафон', 'date': '2026-10-11', 'location': 'Москва', 'url': 'https://moscowmarathon.runc.run/', 'protocol_slug': 'moscow_marathon_42,2km'},
+    {'name': 'Марафон «Белые ночи»', 'date': '2026-06-28', 'location': 'Санкт-Петербург', 'url': 'https://whitenightsmarathon.ru/', 'protocol_slug': 'whitenights'},
 ]
 
 
@@ -31,6 +32,9 @@ class RunCParser(RaceParser):
         try:
             logger.info("Парсинг Беговое сообщество (RunC)...")
             for ev in RUNC_EVENTS_2026:
+                slug = ev.get('protocol_slug', '')
+                year = ev['date'][:4]  # 2026
+                proto_url = f"https://results.runc.run/event/{slug}_{year}/overview/" if slug else ""
                 raw = {
                     'name': ev['name'],
                     'date': ev['date'],
@@ -39,6 +43,7 @@ class RunCParser(RaceParser):
                     'url': ev['url'],
                     'organizer': 'Беговое сообщество',
                     'distances': [],
+                    'protocol_url': proto_url,
                 }
                 race = self.normalize_race_data(raw)
                 if self.is_future_race(race.get('date')):

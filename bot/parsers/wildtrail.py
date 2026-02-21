@@ -7,14 +7,14 @@ from .base import RaceParser
 
 logger = logging.getLogger(__name__)
 
-# Календарь 2026
+# Календарь 2026. Результаты: wildtrail.ru/results, results.wildtrail.ru
 WILDTRAIL_EVENTS_2026 = [
-    {'name': 'Nikola-Lenivets Winter Wild Trail', 'date': '2026-02-14', 'location': 'Никола-Ленivets', 'url': 'https://wildtrail.ru/nlwwt'},
-    {'name': 'Dagestan Wild Trail', 'date': '2026-04-10', 'location': 'Дагестан', 'url': 'https://wildtrail.ru/dwt'},
-    {'name': 'Arkhyz Wild Trail', 'date': '2026-06-26', 'location': 'Архыз', 'url': 'https://wildtrail.ru/awt'},
-    {'name': 'Rosa Wild Fest', 'date': '2026-09-04', 'location': 'Сочи', 'url': 'https://wildtrail.ru/rwt'},
-    {'name': 'Огни Дербента', 'date': '2026-11-15', 'location': 'Дербент', 'url': 'https://lightsofderbent.ru'},
-    {'name': 'Sport-Marafon Fest', 'date': '2026-09-01', 'location': 'Сочи', 'url': 'https://sportmarafonfest.ru'},
+    {'name': 'Nikola-Lenivets Winter Wild Trail', 'date': '2026-02-14', 'location': 'Никола-Ленivets', 'url': 'https://wildtrail.ru/nlwwt', 'protocol_url': 'https://wildtrail.ru/results'},
+    {'name': 'Dagestan Wild Trail', 'date': '2026-04-10', 'location': 'Дагестан', 'url': 'https://wildtrail.ru/dwt', 'protocol_url': 'https://wildtrail.ru/results'},
+    {'name': 'Arkhyz Wild Trail', 'date': '2026-06-26', 'location': 'Архыз', 'url': 'https://wildtrail.ru/awt', 'protocol_url': 'https://wildtrail.ru/results'},
+    {'name': 'Rosa Wild Fest', 'date': '2026-09-04', 'location': 'Сочи', 'url': 'https://wildtrail.ru/rwt', 'protocol_url': 'https://wildtrail.ru/results'},
+    {'name': 'Огни Дербента', 'date': '2026-11-15', 'location': 'Дербент', 'url': 'https://lightsofderbent.ru', 'protocol_url': 'https://wildtrail.ru/results'},
+    {'name': 'Sport-Marafon Fest', 'date': '2026-09-01', 'location': 'Сочи', 'url': 'https://sportmarafonfest.ru', 'protocol_url': 'https://wildtrail.ru/results'},
 ]
 
 
@@ -37,6 +37,7 @@ class WildTrailParser(RaceParser):
                     'location': ev['location'],
                     'url': ev['url'],
                     'organizer': 'Wild Trail',
+                    'protocol_url': ev.get('protocol_url', 'https://wildtrail.ru/results'),
                 }
                 race = self.normalize_race_data(raw)
                 if self.is_future_race(race.get('date')):

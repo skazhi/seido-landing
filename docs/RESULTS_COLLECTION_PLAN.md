@@ -45,11 +45,12 @@
 
 | Организатор | Источник | Формат | Статус |
 |-------------|----------|--------|--------|
-| RussiaRunning | results.russiarunning.com/event/{id} | HTML (SPA) | URL сохраняем, парсер HTML — TODO |
+| RussiaRunning | results.russiarunning.com/event/{id} | HTML (SPA) | ✅ Playwright-парсер |
 | IronStar | iron-star.com | HTML | Парсер нужен |
+| Wild Trail | wildtrail.ru/results | myrace.info | Ссылка на страницу результатов |
 | TIMERMAN | kazan.run, timerman.org | HTML/PDF | Парсер нужен |
-| Беговое сообщество | runc.run, whitenightsmarathon | PDF | parse_protocol |
-| RHR | goldenultra.ru | — | Уточнить |
+| Беговое сообщество | results.runc.run/event/{slug}/overview/ | HTML (SPA) | ✅ Playwright-парсер |
+| RHR | goldenultra.ru, probeg.org | HTML | GRUT: probeg.org/race/54011 |
 | Orgeo | orgeo.ru | API/HTML | Много забегов |
 | 5верст | 5verst.ru | HTML | По локациям |
 | S95 | s95.ru | HTML | Парсер нужен |
@@ -70,7 +71,9 @@
 - [x] `bot/scripts/collect_results.py` — загрузка протоколов по URL из БД и импорт
 - [ ] Добавить `protocol_url` к забегам в парсерах (где доступно)
 - [ ] Запуск collect_results по расписанию (cron: `python -m bot.scripts.collect_results`)
-- [ ] HTML-парсер для results.russiarunning.com (SPA — нужен Playwright или API)
+- [x] HTML-парсер для results.russiarunning.com (Playwright) — `bot/scripts/rr_results_parser.py`
+- [x] HTML-парсер для results.runc.run (Playwright) — `bot/scripts/runc_results_parser.py`
+- [x] HTML-парсер для my.raceresult.com (Playwright) — `bot/scripts/raceresult_parser.py`
 
 ---
 
@@ -86,4 +89,19 @@
 | С protocol_url (results.russiarunning.com) | ~950 |
 | Результатов импортировано | 0 |
 
-**Причина 0 результатов:** `results.russiarunning.com` — HTML (SPA), данные подгружаются JS. Текущий парсер работает только с PDF/Excel. Для импорта нужен HTML-парсер или reverse-engineering API results.
+**Сбор без RR, 5верст, S95 (период 01.06.2025 — 20.02.2026):**
+```bash
+source .venv/bin/activate
+python -m bot.scripts.discover_non_rr
+```
+
+**Сбор всех (в т.ч. RR):**
+```bash
+python -m bot.scripts.collect_results
+```
+
+**Только без RR/5верст/S95:**
+```bash
+python -m bot.scripts.collect_results --exclude-rr-5verst-s95
+```
+Парсер RR обрабатывает до 20 забегов за прогон. Для полного сбора — запускать повторно.
