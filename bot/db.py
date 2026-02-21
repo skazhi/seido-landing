@@ -117,10 +117,45 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_runners_last_name ON runners(last_name);
         CREATE INDEX IF NOT EXISTS idx_runners_telegram ON runners(telegram_id);
         CREATE INDEX IF NOT EXISTS idx_races_date ON races(date);
+        CREATE INDEX IF NOT EXISTS idx_races_organizer ON races(organizer);
         CREATE INDEX IF NOT EXISTS idx_results_runner ON results(runner_id);
         CREATE INDEX IF NOT EXISTS idx_results_race ON results(race_id);
+
+        -- Организаторы (для будущей регистрации и привязки данных)
+        -- См. docs/ORGANIZERS.md
+        CREATE TABLE IF NOT EXISTS organizers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            canonical_name TEXT UNIQUE NOT NULL,
+            display_name TEXT,
+            website TEXT,
+            contact_email TEXT,
+            contact_telegram TEXT,
+            seido_user_id INTEGER,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_organizers_canonical ON organizers(canonical_name);
+
+        -- Обратная связь от пользователей (feedback)
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            runner_id INTEGER REFERENCES runners(id) ON DELETE SET NULL,
+            telegram_id INTEGER,
+            text TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
         await self.db.commit()
+
+        # Миграция: добавить organizer_id в races (если ещё нет)
+        try:
+            await self.db.execute(
+                "ALTER TABLE races ADD COLUMN organizer_id INTEGER REFERENCES organizers(id)"
+            )
+            await self.db.commit()
+        except Exception:
+            pass
 
     # ============================================
     # БЕГУНЫ (RUNNERS)
@@ -198,7 +233,7 @@ class Database:
     # ============================================
 
     async def get_upcoming_races(self, limit: int = 10) -> List[Dict]:
-        """Получить предстоящие забеги"""
+        """Получить предстоящие забеги (анонсы)"""
         async with self.db.execute(
             """
             SELECT * FROM races
@@ -210,6 +245,87 @@ class Database:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+    
+    async def get_past_races(self, limit: int = 20) -> List[Dict]:
+        """Получить прошедшие забеги"""
+        async with self.db.execute(
+            """
+            SELECT r.*, 
+                   COUNT(res.id) as results_count
+            FROM races r
+            LEFT JOIN results res ON r.id = res.race_id
+            WHERE r.date < date('now') AND r.is_active = 1
+            GROUP BY r.id
+            ORDER BY r.date DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_races_with_results(self, limit: int = 20) -> List[Dict]:
+        """Получить забеги с результатами"""
+        async with self.db.execute(
+            """
+            SELECT r.*, 
+                   COUNT(res.id) as results_count
+            FROM races r
+            INNER JOIN results res ON r.id = res.race_id
+            WHERE r.is_active = 1
+            GROUP BY r.id
+            HAVING results_count > 0
+            ORDER BY r.date DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_race_status(self, race_id: int) -> Dict[str, any]:
+        """
+        Определить статус забега
+        
+        Returns:
+            Словарь с полями:
+            - status: 'upcoming', 'past', 'completed'
+            - results_count: количество результатов
+            - has_results: есть ли результаты
+        """
+        race = await self.get_race_by_id(race_id)
+        if not race:
+            return {'status': 'unknown', 'results_count': 0, 'has_results': False}
+        
+        from datetime import date, datetime
+        race_date = datetime.fromisoformat(race['date']).date() if isinstance(race['date'], str) else race['date']
+        today = date.today()
+        
+        # Подсчёт результатов
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM results WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            results_count = row[0] if row else 0
+        
+        has_results = results_count > 0
+        is_past = race_date < today
+        
+        if is_past and has_results:
+            status = 'completed'
+        elif is_past:
+            status = 'past'
+        else:
+            status = 'upcoming'
+        
+        return {
+            'status': status,
+            'results_count': results_count,
+            'has_results': has_results,
+            'race_date': race_date,
+            'is_past': is_past
+        }
 
     async def get_race_by_id(self, race_id: int) -> Optional[Dict]:
         """Получить забег по ID"""
@@ -448,6 +564,39 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid
 
+    async def submit_feedback(
+        self,
+        telegram_id: int,
+        text: str,
+        runner_id: Optional[int] = None,
+    ) -> int:
+        """Сохранить обратную связь от пользователя"""
+        cursor = await self.db.execute(
+            """
+            INSERT INTO feedback (runner_id, telegram_id, text)
+            VALUES (?, ?, ?)
+            """,
+            (runner_id, telegram_id, text)
+        )
+        await self.db.commit()
+        return cursor.lastrowid
+
+    async def get_feedback_list(self, limit: int = 20) -> List[Dict]:
+        """Получить последние сообщения обратной связи"""
+        async with self.db.execute(
+            """
+            SELECT f.id, f.telegram_id, f.text, f.created_at,
+                   r.first_name, r.last_name
+            FROM feedback f
+            LEFT JOIN runners r ON f.runner_id = r.id
+            ORDER BY f.created_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
     # ============================================
     # УДАЛЕНИЕ ДАННЫХ
     # ============================================
@@ -474,6 +623,192 @@ class Database:
         
         await self.db.commit()
         return True
+    
+    async def delete_race(self, race_id: int) -> Dict[str, int]:
+        """
+        Удалить забег и все связанные данные (по запросу организатора)
+        
+        Returns:
+            Словарь со статистикой удаления
+        """
+        stats = {
+            'results_deleted': 0,
+            'subscriptions_deleted': 0
+        }
+        
+        # Подсчёт удаляемых результатов
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM results WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['results_deleted'] = row[0] if row else 0
+        
+        # Подсчёт удаляемых подписок
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM race_subscriptions WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['subscriptions_deleted'] = row[0] if row else 0
+        
+        # Удаляем результаты
+        await self.db.execute(
+            "DELETE FROM results WHERE race_id = ?",
+            (race_id,)
+        )
+        
+        # Удаляем подписки
+        await self.db.execute(
+            "DELETE FROM race_subscriptions WHERE race_id = ?",
+            (race_id,)
+        )
+        
+        # Удаляем забег
+        await self.db.execute(
+            "DELETE FROM races WHERE id = ?",
+            (race_id,)
+        )
+        
+        await self.db.commit()
+        return stats
+    
+    async def delete_races_by_organizer(self, organizer: str) -> Dict[str, int]:
+        """
+        Удалить все забеги организатора (по запросу организатора)
+        
+        Returns:
+            Словарь со статистикой удаления
+        """
+        stats = {
+            'races_deleted': 0,
+            'results_deleted': 0,
+            'subscriptions_deleted': 0
+        }
+        
+        # Получаем все ID забегов организатора
+        async with self.db.execute(
+            "SELECT id FROM races WHERE organizer = ?",
+            (organizer,)
+        ) as cursor:
+            race_ids = [row[0] for row in await cursor.fetchall()]
+        
+        stats['races_deleted'] = len(race_ids)
+        
+        if not race_ids:
+            return stats
+        
+        # Подсчёт результатов
+        placeholders = ','.join('?' * len(race_ids))
+        async with self.db.execute(
+            f"SELECT COUNT(*) FROM results WHERE race_id IN ({placeholders})",
+            race_ids
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['results_deleted'] = row[0] if row else 0
+        
+        # Подсчёт подписок
+        async with self.db.execute(
+            f"SELECT COUNT(*) FROM race_subscriptions WHERE race_id IN ({placeholders})",
+            race_ids
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['subscriptions_deleted'] = row[0] if row else 0
+        
+        # Удаляем результаты
+        await self.db.execute(
+            f"DELETE FROM results WHERE race_id IN ({placeholders})",
+            race_ids
+        )
+        
+        # Удаляем подписки
+        await self.db.execute(
+            f"DELETE FROM race_subscriptions WHERE race_id IN ({placeholders})",
+            race_ids
+        )
+        
+        # Удаляем забеги
+        await self.db.execute(
+            "DELETE FROM races WHERE organizer = ?",
+            (organizer,)
+        )
+        
+        await self.db.commit()
+        return stats
+
+    # ============================================
+    # ОРГАНИЗАТОРЫ (organizers)
+    # См. docs/ORGANIZERS.md
+    # ============================================
+
+    async def get_organizer_by_canonical_name(
+        self, canonical_name: str
+    ) -> Optional[Dict]:
+        """Получить организатора по каноническому имени"""
+        async with self.db.execute(
+            "SELECT * FROM organizers WHERE canonical_name = ?",
+            (canonical_name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_races_by_organizer(self, organizer_name: str) -> List[Dict]:
+        """Получить забеги организатора (по строке organizer) — для сценария привязки"""
+        async with self.db.execute(
+            """
+            SELECT r.*, COUNT(res.id) as results_count
+            FROM races r
+            LEFT JOIN results res ON r.id = res.race_id
+            WHERE r.organizer = ? AND r.is_active = 1
+            GROUP BY r.id
+            ORDER BY r.date DESC
+            """,
+            (organizer_name,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def create_organizer(
+        self,
+        canonical_name: str,
+        display_name: str = '',
+        website: str = '',
+        contact_telegram: str = '',
+        contact_email: str = '',
+    ) -> int:
+        """Создать организатора"""
+        display_name = display_name or canonical_name
+        await self.db.execute(
+            """
+            INSERT INTO organizers (canonical_name, display_name, website, contact_telegram, contact_email, status)
+            VALUES (?, ?, ?, ?, ?, 'active')
+            ON CONFLICT(canonical_name) DO UPDATE SET
+                display_name = excluded.display_name,
+                website = excluded.website,
+                contact_telegram = excluded.contact_telegram,
+                contact_email = excluded.contact_email,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (canonical_name, display_name, website, contact_telegram, contact_email)
+        )
+        await self.db.commit()
+        org = await self.get_organizer_by_canonical_name(canonical_name)
+        return org['id'] if org else 0
+
+    async def link_races_to_organizer(
+        self, organizer_name: str, organizer_id: int
+    ) -> int:
+        """
+        Привязать все забеги с organizer=organizer_name к organizer_id.
+        Используется при регистрации организатора.
+        Returns: количество обновлённых забегов
+        """
+        result = await self.db.execute(
+            "UPDATE races SET organizer_id = ? WHERE organizer = ?",
+            (organizer_id, organizer_name)
+        )
+        await self.db.commit()
+        return result.rowcount
 
 
 # Глобальный экземпляр

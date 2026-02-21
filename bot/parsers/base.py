@@ -141,14 +141,8 @@ class RaceParser(ABC):
     
     def detect_organizer(self, raw: Dict) -> str:
         """
-        Определение организатора по URL или названию
-        
-        Популярные организаторы:
-        - 5верст (5verst, 5 верст)
-        - S95 (Sport-95)
-        - RHR (Run Hide Repeat)
-        - Moscow Marathon
-        - IronStar
+        Определение организатора по URL или названию.
+        Канонические имена см. в docs/ORGANIZERS.md
         """
         url = raw.get('url', '').lower()
         name = raw.get('name', '').lower()
@@ -160,11 +154,26 @@ class RaceParser(ABC):
             'sport-95': 'S95',
             'rhr': 'RHR',
             'runhide': 'RHR',
+            'rhr-marathon': 'RHR',
             'moscow marathon': 'Московский марафон',
+            'moscowmarathon': 'Московский марафон',
             'ironstar': 'IronStar',
             'iron-star': 'IronStar',
             'russiarunning': 'RussiaRunning',
             'myrace': 'MyRace',
+            'timerman': 'TIMERMAN',
+            'kazan.run': 'TIMERMAN',
+            'kazan marathon': 'TIMERMAN',
+            'казанский марафон': 'TIMERMAN',
+            'runc.run': 'Юнистар',
+            'unistar': 'Юнистар',
+            'юнистар': 'Юнистар',
+            'белые ночи': 'Марафон «Белые ночи»',
+            'whitenights': 'Марафон «Белые ночи»',
+            'runup': 'RUNUP',
+            'iloverunning': 'I Love Running',
+            'orgeo': 'Orgeo',
+            'cronosport': 'CronoSport',
         }
         
         for key, value in organizers.items():

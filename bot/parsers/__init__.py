@@ -1,14 +1,7 @@
-"""
-Seido Parsers - Парсеры забегов из различных источников
-"""
-from .base import RaceParser
-from .russiarunning import RussiaRunningParser
-from .myrace import MyRaceParser
-from .ironstar import IronStarParser
+# Импортируем только то, что нужно для RussiaRunning
+from .russiarunning import fetch_russiarunning_events, fetch_events_until_date
 
 __all__ = [
-    'RaceParser',
-    'RussiaRunningParser',
-    'MyRaceParser',
-    'IronStarParser',
+    'fetch_russiarunning_events',
+    'fetch_events_until_date'
 ]

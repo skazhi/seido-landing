@@ -1,134 +1,186 @@
 """
 Seido - Парсер RussiaRunning (russiarunning.com)
-Использует API: https://russiarunning.com/api/events/list/ru
+Парсинг через API
 """
 import aiohttp
+import asyncio
 import logging
+from datetime import date, datetime, timedelta
 from typing import List, Dict, Optional
 from .base import RaceParser
 
 logger = logging.getLogger(__name__)
 
+API_URL = "https://russiarunning.com/api/events/list/ru"
+HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+
 
 class RussiaRunningParser(RaceParser):
-    """Парсер RussiaRunning"""
+    """Парсер RussiaRunning через API"""
     
     SOURCE_NAME = "RussiaRunning"
     BASE_URL = "https://russiarunning.com"
-    API_URL = "https://russiarunning.com/api/events/list/ru"
     
     async def parse_upcoming(self) -> List[Dict]:
         """
-        Парсинг предстоящих забегов через API RussiaRunning
+        Парсинг предстоящих забегов с RussiaRunning
         
         Returns:
             Список словарей с данными о забегах
         """
-        session = await self.get_session()
         races = []
         
         try:
-            # Параметры запроса
-            payload = {
-                'Take': 500,  # Максимальное количество
-                'DateFrom': '',  # Все будущие
-                'Filters': {},
-            }
-            
             logger.info(f"Парсинг RussiaRunning...")
             
-            async with session.post(self.API_URL, json=payload) as response:
-                if response.status != 200:
-                    logger.error(f"RussiaRunning API error: {response.status}")
-                    return races
-                
-                data = await response.json()
-                
-                if not data or 'Items' not in data:
-                    logger.warning("RussiaRunning: нет данных в ответе")
-                    return races
-                
-                for item in data['Items']:
-                    try:
-                        race = self._parse_event(item)
-                        if race and self.is_future_race(race.get('date')):
-                            races.append(race)
-                    except Exception as e:
-                        logger.error(f"Ошибка парсинга события: {e}")
-                        continue
-                
-                logger.info(f"RussiaRunning: найдено {len(races)} забегов")
-                
-        except aiohttp.ClientError as e:
-            logger.error(f"RussiaRunning: ошибка соединения - {e}")
+            # Получаем события на ближайшие 6 месяцев
+            end_date = date.today() + timedelta(days=180)
+            events = await self._fetch_events_until_date(end_date)
+            
+            for event in events:
+                try:
+                    race = self._normalize_event(event)
+                    if race and self.is_future_race(race.get('date')):
+                        races.append(race)
+                except Exception as e:
+                    logger.debug(f"Ошибка обработки события RussiaRunning: {e}")
+                    continue
+            
+            logger.info(f"RussiaRunning: найдено {len(races)} забегов")
+            
         except Exception as e:
-            logger.error(f"RussiaRunning: непредвиденная ошибка - {e}")
+            logger.error(f"RussiaRunning: ошибка парсинга - {e}")
         
         return races
     
-    def _parse_event(self, item: Dict) -> Optional[Dict]:
-        """
-        Парсинг одного события из API
+    async def _fetch_events_until_date(self, end_date: date) -> List[Dict]:
+        """Получает все события до указанной даты"""
+        today = date.today()
         
-        Args:
-            item: Данные события из API
-            
-        Returns:
-            Нормализованные данные о забеге
-        """
         try:
-            # Извлечение базовой информации
-            raw = {
-                'name': item.get('Name', ''),
-                'date': item.get('StartDate', ''),
-                'city': item.get('City', ''),
-                'location': item.get('Location', ''),
-                'url': f"{self.BASE_URL}{item.get('Url', '')}",
-                'distances': [],
+            payload = {
+                "Take": 500,
+                "DateFrom": today.isoformat()
             }
             
-            # Парсинг дистанций
-            distances = []
-            if 'Distances' in item:
-                for dist in item['Distances']:
-                    distances.append({
-                        'name': dist.get('Name', ''),
-                        'length': dist.get('Length', 0),
-                        'elevation': dist.get('ElevationGain', 0),
-                    })
-            raw['distances'] = distances
+            session = await self.get_session()
+            async with session.post(API_URL, json=payload, headers=HEADERS) as resp:
+                if resp.status != 200:
+                    raise Exception(f"RussiaRunning API error: {resp.status}")
+                data = await resp.json()
             
-            # Определение типа забега
-            race_type = 'шоссе'
-            if item.get('TypeName'):
-                type_name = item.get('TypeName', '').lower()
-                if 'трейл' in type_name or 'trail' in type_name:
-                    race_type = 'трейл'
-                elif 'кросс' in type_name:
-                    race_type = 'кросс'
-                elif 'стадион' in type_name:
-                    race_type = 'стадион'
+            events = []
+            for item in data.get("Items", []):
+                event_date_str = item.get("d", "").split("T")[0]
+                try:
+                    event_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
+                    if event_date <= end_date:
+                        events.append({
+                            "source": "russiarunning",
+                            "external_id": str(item.get("c", "")),
+                            "title": item.get("t", "").strip(),
+                            "city": item.get("p", "").strip(),
+                            "event_date": event_date,
+                            "url": f"https://russiarunning.com/event/{item.get('c', '')}/"
+                        })
+                except ValueError:
+                    continue
             
-            raw['race_type'] = race_type
-            
-            return self.normalize_race_data(raw)
+            return events
             
         except Exception as e:
-            logger.error(f"Ошибка парсинга события RussiaRunning: {e}")
-            return None
+            logger.error(f"RussiaRunning: ошибка получения событий - {e}")
+            return []
+    
+    def _normalize_event(self, event: Dict) -> Dict:
+        """Нормализация события RussiaRunning"""
+        raw = {
+            'name': event.get('title', ''),
+            'date': event.get('event_date'),
+            'city': event.get('city', ''),
+            'location': event.get('city', ''),
+            'url': event.get('url', ''),
+            'distances': [],
+        }
+        
+        return self.normalize_race_data(raw)
     
     async def parse_results(self, race_url: str) -> List[Dict]:
         """
         Парсинг результатов забега
         
-        RussiaRunning не предоставляет публичные протоколы через API,
-        поэтому этот метод возвращает пустой список.
+        RussiaRunning имеет протоколы, но они требуют отдельного парсинга.
+        Для MVP возвращаем пустой список.
         
         Args:
             race_url: URL страницы забега
             
         Returns:
-            Пустой список (требуется ручной парсинг или договор)
+            Пустой список
         """
         logger.warning(f"RussiaRunning: парсинг результатов недоступен для {race_url}")
         return []
+
+
+# Оставляем старые функции для обратной совместимости
+async def fetch_russiarunning_events(
+    date_from: str = None,
+    take: int = 500
+) -> List[Dict]:
+    """
+    Получает список событий с API RussiaRunning.
+    """
+    if date_from is None:
+        date_from = date.today().isoformat()
+    
+    payload = {
+        "Take": take,
+        "DateFrom": date_from
+    }
+    
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
+        async with session.post(API_URL, json=payload) as resp:
+            if resp.status != 200:
+                raise Exception(f"RussiaRunning API error: {resp.status}")
+            data = await resp.json()
+    
+    events = []
+    for item in data.get("Items", []):
+        event_date_str = item.get("d", "").split("T")[0]
+        try:
+            event_date = datetime.strptime(event_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        
+        events.append({
+            "source": "russiarunning",
+            "external_id": str(item.get("c", "")),
+            "title": item.get("t", "").strip(),
+            "city": item.get("p", "").strip(),
+            "event_date": event_date,
+            "url": f"https://russiarunning.com/event/{item.get('c', '')}/"
+        })
+    
+    return events
+
+
+async def fetch_events_until_date(end_date: date) -> List[Dict]:
+    """
+    Получает все события до указанной даты.
+    """
+    today = date.today()
+    events = await fetch_russiarunning_events(
+        date_from=today.isoformat(),
+        take=500
+    )
+    
+    # Фильтруем по дате окончания
+    filtered_events = [
+        ev for ev in events 
+        if ev["event_date"] <= end_date
+    ]
+    
+    return filtered_events
