@@ -259,6 +259,22 @@ def normalize_city(city_str: str) -> str:
     return city.title()
 
 
+def _looks_like_runner_name(text: str) -> bool:
+    """Проверка: похоже ли на ФИО (а не на категорию/дистанцию)"""
+    if not text or len(text) < 4:
+        return False
+    t = text.lower()
+    # Категории и метки, которые не ФИО
+    skip = ("онлайн", "офлайн", "участие", "забег", "детский", "км.", "км ", "полумарафон",
+            "марафон", "дистанц", "категор", "всего", "место", "фио")
+    if any(s in t for s in skip):
+        return False
+    # Должна содержать буквы
+    if not any(c.isalpha() for c in text):
+        return False
+    return True
+
+
 def normalize_protocol_row(row: Dict) -> Dict:
     """
     Нормализация одной строки протокола
@@ -273,6 +289,11 @@ def normalize_protocol_row(row: Dict) -> Dict:
     
     # ФИО
     full_name = row.get('name') or row.get('full_name') or row.get('фио') or ''
+    if not _looks_like_runner_name(full_name):
+        return {'first_name': '', 'last_name': '', **{k: None for k in [
+            'middle_name', 'finish_time_seconds', 'overall_place', 'birth_date', 'distance',
+            'gender', 'city', 'gender_place', 'age_group_place', 'age_group', 'club'
+        ]}}
     name_parts = normalize_name(full_name)
     normalized.update(name_parts)
     

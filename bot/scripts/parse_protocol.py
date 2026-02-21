@@ -268,7 +268,75 @@ class ProtocolImporter:
         
         logger.info(f"Импорт завершён: {imported} результатов")
         self.print_stats()
-    
+
+    async def import_from_raw_data(
+        self,
+        raw_data: List[Dict],
+        race_name: str,
+        race_date: str,
+        race_location: str = '',
+        race_organizer: str = '',
+        race_type: str = 'шоссе',
+        distance: str = '',
+        website_url: str = '',
+        protocol_url: str = '',
+    ):
+        """
+        Импорт результатов из уже распарсенных данных (например, из HTML).
+        """
+        if not raw_data:
+            logger.warning("Нет данных для импорта")
+            return
+
+        logger.info(f"Импорт из {len(raw_data)} строк: {race_name} ({race_date})")
+
+        dist_json = f'[{{"name": "{distance or "?"}", "elevation": 0}}]'
+        race_id = await self.find_or_create_race(
+            name=race_name,
+            date=race_date,
+            location=race_location,
+            organizer=race_organizer,
+            race_type=race_type,
+            distances=dist_json,
+            website_url=website_url,
+            protocol_url=protocol_url
+        )
+
+        imported = 0
+        for i, row in enumerate(raw_data, 1):
+            try:
+                normalized = normalize_protocol_row(row)
+                if not normalized.get('last_name') or not normalized.get('first_name'):
+                    continue
+                result_distance = distance or normalized.get('distance', '') or '?'
+                runner_id = await self.find_or_create_runner(
+                    first_name=normalized['first_name'],
+                    last_name=normalized['last_name'],
+                    birth_date=normalized.get('birth_date'),
+                    gender=normalized.get('gender'),
+                    city=normalized.get('city')
+                )
+                await self.import_result(
+                    runner_id=runner_id,
+                    race_id=race_id,
+                    distance=result_distance,
+                    finish_time_seconds=normalized.get('finish_time_seconds'),
+                    overall_place=normalized.get('overall_place'),
+                    gender_place=normalized.get('gender_place'),
+                    age_group_place=normalized.get('age_group_place'),
+                    total_runners=None,
+                )
+                imported += 1
+                if imported % 100 == 0:
+                    logger.info(f"Импортировано {imported} результатов...")
+            except Exception as e:
+                logger.debug(f"Ошибка строка {i}: {e}")
+                self.stats['errors'] += 1
+
+        await db.db.commit()
+        logger.info(f"Импорт завершён: {imported} результатов")
+        self.print_stats()
+
     def print_stats(self):
         """Вывод статистики импорта"""
         print("\n" + "="*50)
