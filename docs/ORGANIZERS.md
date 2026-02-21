@@ -18,7 +18,7 @@
 | 3 | RussiaRunning | [russiarunning.com](https://russiarunning.com) | Москва, СПб, Ярославль, Золотое кольцо, Воркута | Моя столица, Золотое кольцо, Арктический марафон |
 | 4 | Юнистар (Unistar) | [runc.run](https://runc.run) | Москва, СПб, Казань | Московский марафон, Белые ночи, Лига БРИКС |
 | 5 | TIMERMAN | [kazan.run](https://kazan.run), [timerman.org](https://timerman.org) | Казань, Татарстан | Казанский марафон (35k+ участников) |
-| 6 | RHR | [rhr-marathon.ru](https://rhr-marathon.ru) | Москва | Run Hide Repeat, серия забегов |
+| 6 | RHR | [goldenultra.ru](https://goldenultra.ru) | Москва, регионы | Running Heroes Russia, ультратрейлы |
 | 7 | IronStar | [iron-star.com](https://iron-star.com) | Москва, Сочи, Анапа, Египет | Триатлон + бег |
 | 8 | MyRace | [myrace.ru](https://myrace.ru) | Разные регионы | Регистрация и результаты |
 | 9 | CronoSport | [cronosport.ru](https://cronosport.ru) | — | Хронометраж (используют организаторы) |
@@ -33,6 +33,12 @@
 | 18 | Run Crimea | — | Крым | Региональные забеги |
 | 19 | Уральский марафон | — | Екатеринбург | Региональный марафон |
 | 20 | Run Krasnodar | — | Краснодар | Региональные забеги |
+| 21 | Wild Trail | [wildtrail.ru](https://wildtrail.ru) | Москва, Архыз, Сочи, Дагестан | Трейл, ультра |
+| 22 | Open Band | [openband.run](https://openband.run) | Московская область | Open Band Trails, трейл-серия |
+| 23 | Высшая лига | [topliga.ru](https://topliga.ru), [events.topliga.ru](https://events.topliga.ru) | Юг РФ, Сочи | Забеги, велогонки, марафоны |
+| 24 | Dream Trail | [dtrail.ru](https://dtrail.ru) | Лысково, Химки | Трейл (Lyskovo, Khimki Forest) |
+| 25 | TulaMarathon | [tulamarathon.org](https://tulamarathon.org) | Тула | Серия забегов, полумарафоны |
+| 26 | reg.o-time.ru | [reg.o-time.ru](https://reg.o-time.ru) | — | Агрегатор регистраций |
 
 ---
 
@@ -62,9 +68,9 @@
 - **Сайт:** kazan.run, timerman.org
 - **Результаты:** публикуются на сайте после забега
 
-### 6. RHR
-- **Результаты:** rhr-marathon.ru/results
-- **Парсер:** есть в `collect_protocols.py`
+### 6. RHR (Running Heroes Russia)
+- **Сайт:** goldenultra.ru
+- **Результаты:** на сайте, ITRA
 
 ### 7. IronStar
 - **Результаты:** на сайте iron-star.com по каждому событию
@@ -117,8 +123,13 @@
 | RussiaRunning | API + страницы забегов | Расширить для результатов |
 | Юнистар | runc.run, сайты марафонов | Добавить сбор протоколов |
 | TIMERMAN | kazan.run | Добавить сбор протоколов |
-| RHR | rhr-marathon.ru | Уже есть |
-| IronStar | iron-star.com | Добавить |
+| RHR | goldenultra.ru | Добавить парсер |
+| Wild Trail | wildtrail.ru | Добавить |
+| Open Band | openband.run | Добавить |
+| Высшая лига | topliga.ru | Добавить |
+| Dream Trail | dtrail.ru | Добавить |
+| TulaMarathon | tulamarathon.org | Добавить |
+| IronStar | iron-star.com | ✅ Есть |
 | Orgeo | orgeo.ru | Исследовать API |
 
 ---

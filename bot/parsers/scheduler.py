@@ -12,8 +12,15 @@ from apscheduler.triggers.cron import CronTrigger
 
 from parsers.base import RaceParser
 from parsers.russiarunning import RussiaRunningParser
-from parsers.myrace import MyRaceParser
 from parsers.ironstar import IronStarParser
+from parsers.runc import RunCParser
+from parsers.timerman import TimerManParser
+from parsers.goldenultra import GoldenUltraParser
+from parsers.wildtrail import WildTrailParser
+from parsers.openband import OpenBandParser
+from parsers.dtrail import DreamTrailParser
+from parsers.tulamarathon import TulaMarathonParser
+from parsers.topliga import TopligaParser
 from db import db
 
 logger = logging.getLogger(__name__)
@@ -31,8 +38,15 @@ class ParseScheduler:
         """Настройка парсеров"""
         self.parsers = [
             RussiaRunningParser(),
-            MyRaceParser(),
             IronStarParser(),
+            RunCParser(),
+            TimerManParser(),
+            GoldenUltraParser(),
+            WildTrailParser(),
+            OpenBandParser(),
+            DreamTrailParser(),
+            TulaMarathonParser(),
+            TopligaParser(),
         ]
     
     async def parse_all(self) -> Dict[str, int]:
@@ -97,7 +111,7 @@ class ParseScheduler:
                 race_type=race.get('race_type', 'шоссе'),
                 distances=race.get('distances', '[]'),
                 website_url=race.get('website_url', ''),
-                source=race.get('source', ''),
+                protocol_url=race.get('protocol_url', ''),
             )
             return True
             

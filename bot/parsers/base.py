@@ -56,12 +56,14 @@ class RaceParser(ABC):
         Returns:
             Нормализованные данные
         """
+        name = self.clean_string(raw.get('name', ''))
+        race_type = raw.get('race_type') or self.detect_race_type(name)
         return {
-            'name': self.clean_string(raw.get('name', '')),
+            'name': name,
             'date': self.parse_date(raw.get('date')),
             'location': self.clean_string(raw.get('city', raw.get('location', ''))),
             'organizer': self.detect_organizer(raw),
-            'race_type': raw.get('race_type', 'шоссе'),
+            'race_type': race_type,
             'distances': self.parse_distances(raw.get('distances', [])),
             'website_url': raw.get('url', raw.get('website_url', '')),
             'protocol_url': raw.get('protocol_url', ''),
@@ -165,15 +167,25 @@ class RaceParser(ABC):
             'kazan.run': 'TIMERMAN',
             'kazan marathon': 'TIMERMAN',
             'казанский марафон': 'TIMERMAN',
-            'runc.run': 'Юнистар',
-            'unistar': 'Юнистар',
-            'юнистар': 'Юнистар',
+            'runc.run': 'Беговое сообщество',
+            'unistar': 'Беговое сообщество',
+            'юнистар': 'Беговое сообщество',
             'белые ночи': 'Марафон «Белые ночи»',
             'whitenights': 'Марафон «Белые ночи»',
             'runup': 'RUNUP',
             'iloverunning': 'I Love Running',
             'orgeo': 'Orgeo',
             'cronosport': 'CronoSport',
+            'goldenultra': 'RHR',
+            'rhr': 'RHR',
+            'wildtrail': 'Wild Trail',
+            'openband': 'Open Band',
+            'topliga': 'Высшая лига',
+            'vysshaya liga': 'Высшая лига',
+            'dream trail': 'Dream Trail',
+            'dtrail': 'Dream Trail',
+            'tulamarathon': 'TulaMarathon',
+            'o-time': 'reg.o-time.ru',
         }
         
         for key, value in organizers.items():
@@ -181,6 +193,30 @@ class RaceParser(ABC):
                 return value
         
         return raw.get('organizer', 'Не указан')
+
+    def detect_race_type(self, name: str) -> str:
+        """
+        Определение типа забега по ключевым словам в названии.
+        См. docs/ANNOUNCEMENTS_LOGIC.md
+        """
+        if not name:
+            return 'шоссе'
+        name_lower = name.lower()
+        keywords = {
+            'трейл': ['трейл', 'trail', 'трейлраннинг', 'trailrunning'],
+            'кросс': ['кросс', 'cross'],
+            'горный': ['горный', 'mountain', 'skyrace', 'skyrunning'],
+            'ультра': ['ультра', 'ultra', '50 км', '100 км'],
+            'триатлон': ['триатлон', 'triathlon', 'ironstar', 'iron star'],
+            'ночной': ['ночной', 'night run', 'ночная'],
+            'зимний': ['зимний', 'снежный', 'ледовый', 'ice', 'snow'],
+            'стадион': ['стадион', 'indoor', 'индор'],
+            'акватлон': ['акватлон', 'aquathlon'],
+        }
+        for race_type, kws in keywords.items():
+            if any(kw in name_lower for kw in kws):
+                return race_type
+        return 'шоссе'
     
     def parse_distances(self, distances: Any) -> str:
         """

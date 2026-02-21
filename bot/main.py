@@ -10,6 +10,8 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from config import BOT_TOKEN, PROJECT_NAME
 from db import db
 from handlers import router
@@ -19,7 +21,7 @@ from parsers.scheduler import scheduler as parse_scheduler
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp = Dispatcher()
 
 # Регистрируем роутер с обработчиками

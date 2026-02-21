@@ -36,8 +36,8 @@ class RussiaRunningParser(RaceParser):
         try:
             logger.info(f"Парсинг RussiaRunning...")
             
-            # Получаем события на ближайшие 6 месяцев
-            end_date = date.today() + timedelta(days=180)
+            # Получаем события до конца 2026
+            end_date = date(2026, 12, 31)
             events = await self._fetch_events_until_date(end_date)
             
             for event in events:
