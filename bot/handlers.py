@@ -572,15 +572,21 @@ async def process_find_result(message: types.Message, state: FSMContext):
             text += f"   Протокол: {r['protocol_url'][:60]}…\n"
         text += "\n"
 
-    # Кнопки «Это я» для каждого результата (пока первые 5)
+    # Кнопки «Это я» и «Протокол» для каждого результата (пока первые 5)
     buttons = []
     for r in results[:5]:
         rid = r.get('result_id')
+        race_id = r.get('race_id')
+        row = []
         if rid:
-            buttons.append([InlineKeyboardButton(
-                text=f"Это я: {r.get('race_name', '')[:25]}… ({r.get('distance')})",
+            row.append(InlineKeyboardButton(
+                text=f"Это я: {r.get('race_name', '')[:20]}…",
                 callback_data=f"claim:{rid}"
-            )])
+            ))
+        if race_id:
+            row.append(InlineKeyboardButton(text="📄 Протокол", callback_data=f"race:{race_id}"))
+        if row:
+            buttons.append(row)
     kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
     await message.answer(text, reply_markup=kb)
     await state.clear()
@@ -912,8 +918,8 @@ async def cmd_help(message: types.Message):
         "/find_result - Найти результат по ФИО (заявка «это я»)\n"
         "/profile - Мой профиль, рекорды, обратная связь\n"
         "/calendar - Предстоящие забеги\n"
-        "/search - Поиск забегов (город, дата, тип)\n"
-        "/history - Прошедшие забеги\n"
+        "/search - Поиск забегов (город, дата, тип, название)\n"
+        "/history - Прошедшие забеги (ввести «белые ночи» и т.п.)\n"
         "/stats - Общая статистика\n"
         "/compare - Сравнение с другим бегуном\n"
         "/addrace - Предложить забег\n"
@@ -923,6 +929,7 @@ async def cmd_help(message: types.Message):
         "Мои данные: 📊 Мои результаты | 🔎 Найти результат | 👤 Мой профиль\n"
         "Забеги: 📅 Календарь | 🔍 Поиск | 📜 История\n"
         "Сообщество: 🏃 Сравнение | ➕ Добавить забег | 📈 Статистика\n\n"
+        "📄 Нажми на забег → карточка → Результаты = протокол в боте, «Это я» = привязать.\n\n"
         "🔒 Конфиденциальность:\n"
         "Ваши данные защищены. Вы можете удалить их в любой момент командой /delete.\n\n"
         "Полная политика: https://skazhi.github.io/seido-landing/docs/offer.md\n\n"
@@ -971,16 +978,31 @@ def _build_pagination_kb(prefix: str, offset: int, total: int, limit: int = 10) 
     if total > offset + limit:
         next_off = offset + limit
         buttons.append(InlineKeyboardButton(text="Далее ▶", callback_data=f"{prefix}:{next_off}"))
-    page = (offset // limit) + 1
-    total_pages = (total + limit - 1) // limit
     if buttons:
         return InlineKeyboardMarkup(inline_keyboard=[[*buttons]])
     return None
 
 
+def _build_race_list_keyboard(races: list, prefix: str, offset: int, total: int, limit: int = 10) -> InlineKeyboardMarkup | None:
+    """Клавиатура: «Карточка забега» для каждого забега + пагинация. В карточке — протокол внутри бота."""
+    rows = []
+    for r in races:
+        rid = r.get("id")
+        if rid is None:
+            continue
+        name = (r.get("name") or "")[:26]
+        date_short = (r.get("date") or "")[:10]
+        btn_text = f"📄 {name} ({date_short})"[:64]
+        rows.append([InlineKeyboardButton(text=btn_text, callback_data=f"race:{rid}")])
+    pagination = _build_pagination_kb(prefix, offset, total, limit)
+    if pagination and pagination.inline_keyboard:
+        rows.append(pagination.inline_keyboard[0])
+    return InlineKeyboardMarkup(inline_keyboard=rows) if rows else _build_pagination_kb(prefix, offset, total, limit)
+
+
 def _format_race_footer() -> str:
     """Подсказка под списком забегов"""
-    return "\n_Чтобы добавить результат: 🔎 Найти результат → введи ФИО → «Это я»_"
+    return "\n_Нажми на забег — карточка с протоколом внутри бота. «Это я» — привязать результат к профилю._"
 
 
 async def _send_calendar_page(bot_or_message, races: list, total: int, offset: int, title: str, prefix: str = "cal"):
@@ -995,7 +1017,7 @@ async def _send_calendar_page(bot_or_message, races: list, total: int, offset: i
         response += _format_race(r, show_type=True)
         response += "\n"
     response += _format_race_footer()
-    kb = _build_pagination_kb(prefix, offset, total)
+    kb = _build_race_list_keyboard(races, prefix, offset, total)
     await bot.send_message(chat_id, response, reply_markup=kb)
 
 
@@ -1040,8 +1062,109 @@ async def cb_calendar_page(callback: CallbackQuery):
         response += _format_race(r, show_type=True)
         response += "\n"
     response += _format_race_footer()
-    kb = _build_pagination_kb("cal", offset, total)
+    kb = _build_race_list_keyboard(races, "cal", offset, total)
     await callback.message.edit_text(response, reply_markup=kb)
+    await callback.answer()
+
+
+# ============================================
+# КАРТОЧКА ЗАБЕГА + ФИНИШНЫЙ ПРОТОКОЛ ВНУТРИ БОТА
+# ============================================
+@router.callback_query(F.data.startswith("race:"))
+async def cb_race_card(callback: CallbackQuery):
+    """Карточка забега: инфо + кнопка «Результаты» (протокол внутри бота)"""
+    try:
+        race_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка")
+        return
+
+    race = await db.get_race_by_id(race_id)
+    if not race:
+        await callback.answer("Забег не найден")
+        return
+
+    _, total_in_protocol = await db.get_race_results(race_id, limit=1, offset=0)
+
+    text = _format_race(race, show_type=True)
+    text += f"\n\n📊 Финишеров в протоколе: {total_in_protocol}"
+
+    buttons = []
+    if total_in_protocol > 0:
+        buttons.append([InlineKeyboardButton(
+            text="📄 Результаты (протокол)",
+            callback_data=f"prot:{race_id}:0"
+        )])
+    ext_url = race.get("protocol_url") or race.get("website_url")
+    if ext_url:
+        btn_label = "🔗 Протокол на сайте" if total_in_protocol > 0 else "🔗 Результаты на сайте"
+        buttons.append([InlineKeyboardButton(text=btn_label, url=ext_url)])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("prot:"))
+async def cb_race_protocol(callback: CallbackQuery):
+    """Финишный протокол забега: список бегунов с кнопками «Это я»"""
+    try:
+        parts = callback.data.split(":")
+        race_id = int(parts[1])
+        offset = int(parts[2]) if len(parts) > 2 else 0
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка")
+        return
+
+    race = await db.get_race_by_id(race_id)
+    if not race:
+        await callback.answer("Забег не найден")
+        return
+
+    PROTOCOL_PAGE_SIZE = 15
+    results, total = await db.get_race_results(race_id, limit=PROTOCOL_PAGE_SIZE, offset=offset)
+
+    if not results:
+        text = f"📄 **{_escape_md(race.get('name', ''))}** ({race.get('date', '')})\n\nПротокол пока не загружен в базу."
+        ext_url = race.get("protocol_url") or race.get("website_url")
+        if ext_url:
+            text += f"\n\nСсылка: {ext_url}"
+        await callback.message.edit_text(text)
+        await callback.answer()
+        return
+
+    text = f"📄 **Финишный протокол**\n{_escape_md(race.get('name', ''))} ({race.get('date', '')})\n\n"
+    rows_buttons = []
+    for r in results:
+        place = r.get("overall_place") or "—"
+        name = f"{r.get('last_name', '')} {r.get('first_name', '')} {r.get('middle_name', '') or ''}".strip() or "—"
+        sec = r.get("finish_time_seconds")
+        time_str = r.get("finish_time") or _format_seconds(sec)
+        dist = r.get("distance", "")
+        line = f"{place}. {_escape_md(name)} — {time_str}"
+        if dist:
+            line += f" ({dist})"
+        text += line + "\n"
+        rid = r.get("result_id")
+        if rid:
+            rows_buttons.append([InlineKeyboardButton(
+                text=f"№{place} Это я",
+                callback_data=f"claim:{rid}"
+            )])
+
+    text += f"\n_Стр. {offset // PROTOCOL_PAGE_SIZE + 1} из {(total + PROTOCOL_PAGE_SIZE - 1) // PROTOCOL_PAGE_SIZE} | Всего: {total}_"
+
+    # Пагинация
+    nav = []
+    if offset > 0:
+        nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"prot:{race_id}:{max(0, offset - PROTOCOL_PAGE_SIZE)}"))
+    if offset + PROTOCOL_PAGE_SIZE < total:
+        nav.append(InlineKeyboardButton(text="Далее ▶", callback_data=f"prot:{race_id}:{offset + PROTOCOL_PAGE_SIZE}"))
+    if nav:
+        rows_buttons.append(nav)
+    # Кнопка «Назад к карточке»
+    rows_buttons.append([InlineKeyboardButton(text="◀ К карточке забега", callback_data=f"race:{race_id}")])
+
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows_buttons))
     await callback.answer()
 
 
@@ -1212,7 +1335,7 @@ async def cb_search_page(callback: CallbackQuery):
         response += _format_race(r, show_type=True)
         response += "\n"
     response += _format_race_footer()
-    kb = _build_pagination_kb("sr", offset, total)
+    kb = _build_race_list_keyboard(races, "sr", offset, total)
     await callback.message.edit_text(response, reply_markup=kb)
     await callback.answer()
 
@@ -1298,7 +1421,7 @@ async def cb_history_page(callback: CallbackQuery):
         response += _format_race(r, show_type=True)
         response += "\n"
     response += _format_race_footer()
-    kb = _build_pagination_kb("hist", offset, total)
+    kb = _build_race_list_keyboard(races, "hist", offset, total)
     await callback.message.edit_text(response, reply_markup=kb)
     await callback.answer()
 

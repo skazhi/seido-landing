@@ -446,6 +446,15 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows], total
 
+    async def get_race_by_id(self, race_id: int) -> Optional[Dict]:
+        """Получить забег по ID (для карточки забега)"""
+        async with self.db.execute(
+            "SELECT * FROM races WHERE id = ? AND is_active = 1",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_race_by_url(self, url: str) -> Optional[Dict]:
         """Получить забег по URL (для проверки на дубликат)"""
         if not url:
@@ -456,6 +465,36 @@ class Database:
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+    async def get_race_results(
+        self, race_id: int, limit: int = 30, offset: int = 0
+    ) -> tuple[List[Dict], int]:
+        """
+        Финишный протокол забега: список результатов с ФИО бегунов.
+        Returns: (results, total_count)
+        """
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM results WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+
+        async with self.db.execute(
+            """
+            SELECT r.id as result_id, r.runner_id, r.distance, r.finish_time, r.finish_time_seconds,
+                   r.overall_place, r.gender_place, r.total_runners,
+                   ru.last_name, ru.first_name, ru.middle_name, ru.birth_date, ru.telegram_id
+            FROM results r
+            JOIN runners ru ON r.runner_id = ru.id
+            WHERE r.race_id = ?
+            ORDER BY (r.overall_place IS NULL), r.overall_place ASC, r.finish_time_seconds ASC, r.id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (race_id, limit, offset)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows], total
 
     async def add_race(
         self,
@@ -566,7 +605,7 @@ class Database:
         q = f"%{query.strip()}%"
         async with self.db.execute(
             """
-            SELECT r.id as result_id, r.runner_id, r.distance, r.finish_time, r.finish_time_seconds,
+            SELECT r.id as result_id, r.runner_id, r.race_id, r.distance, r.finish_time, r.finish_time_seconds,
                    r.overall_place, r.total_runners,
                    ru.last_name, ru.first_name, ru.middle_name, ru.birth_date, ru.telegram_id,
                    rac.name as race_name, rac.date as race_date, rac.organizer,

@@ -81,16 +81,24 @@ def _is_excluded(race: dict, exclude_patterns: tuple) -> bool:
     return False
 
 
-async def run_collect(exclude_rr_5verst_s95: bool = False):
+async def run_collect(
+    exclude_rr_5verst_s95: bool = False,
+    max_races: int = 2000,
+    runc_limit: int = 200,
+    raceresult_limit: int = 100,
+    rr_limit: int = 100,
+):
     """Основная логика сбора (db должна быть подключена).
     exclude_rr_5verst_s95: исключить RussiaRunning, 5верст, S95
+    max_races: макс. забегов за прогон
+    runc_limit, raceresult_limit, rr_limit: лимиты по источникам за прогон
     """
-    sql = """
+    sql = f"""
         SELECT id, name, date, location, organizer, race_type, protocol_url, website_url
         FROM races
         WHERE date < date('now') AND protocol_url IS NOT NULL AND protocol_url != ''
         ORDER BY date DESC
-        LIMIT 500
+        LIMIT {max_races}
     """
     async with db.db.execute(sql) as cursor:
         all_races = [dict(row) for row in await cursor.fetchall()]
@@ -119,9 +127,6 @@ async def run_collect(exclude_rr_5verst_s95: bool = False):
     rr_processed = 0
     runc_processed = 0
     raceresult_processed = 0
-    RR_LIMIT = 20
-    RUNC_LIMIT = 50
-    RACERESULT_LIMIT = 20
 
     for race in races:
         url = race.get("protocol_url", "").strip()
@@ -164,8 +169,8 @@ async def run_collect(exclude_rr_5verst_s95: bool = False):
 
         # RunC (results.runc.run) — парсим через Playwright
         if "results.runc.run" in url:
-            if runc_processed >= RUNC_LIMIT:
-                logger.info(f"  Пропуск RunC (достигнут лимит {RUNC_LIMIT})")
+            if runc_processed >= runc_limit:
+                logger.info(f"  Пропуск RunC (достигнут лимит {runc_limit})")
                 continue
             try:
                 from bot.scripts.runc_results_parser import fetch_runc_results
@@ -252,9 +257,31 @@ async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--exclude-rr-5verst-s95", action="store_true",
                         help="Исключить RussiaRunning, 5верст, S95")
+    parser.add_argument("--max-races", type=int, default=2000,
+                        help="Макс. забегов за прогон (default: 2000)")
+    parser.add_argument("--runc-limit", type=int, default=200,
+                        help="Лимит RunC за прогон (default: 200)")
+    parser.add_argument("--raceresult-limit", type=int, default=100,
+                        help="Лимит RaceResult за прогон (default: 100)")
+    parser.add_argument("--rr-limit", type=int, default=100,
+                        help="Лимит RussiaRunning за прогон при включённом RR (default: 100)")
+    parser.add_argument("--loop", type=int, default=1,
+                        help="Запустить N раз подряд (для долгого сбора)")
     args = parser.parse_args()
     await db.connect()
-    await run_collect(exclude_rr_5verst_s95=args.exclude_rr_5verst_s95)
+    for i in range(args.loop):
+        if args.loop > 1:
+            logger.info(f"=== Прогон {i + 1}/{args.loop} ===")
+        await run_collect(
+            exclude_rr_5verst_s95=args.exclude_rr_5verst_s95,
+            max_races=args.max_races,
+            runc_limit=args.runc_limit,
+            raceresult_limit=args.raceresult_limit,
+            rr_limit=args.rr_limit,
+        )
+        if i < args.loop - 1:
+            import time
+            time.sleep(5)  # пауза между прогонами
     await db.disconnect()
 
 
