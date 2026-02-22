@@ -14,3 +14,6 @@ ADMINS = [
 # Названия проекта
 PROJECT_NAME = "Seido"
 PROJECT_TAGLINE = "Засейди свои результаты"
+
+# Мониторинг: URL от Healthchecks.io (опционально)
+HEALTHCHECK_URL = os.getenv("HEALTHCHECK_URL", "").strip()

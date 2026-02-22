@@ -13,7 +13,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
-from config import BOT_TOKEN, PROJECT_NAME
+from config import BOT_TOKEN, PROJECT_NAME, HEALTHCHECK_URL
 from db import db
 from handlers import router
 from parsers.scheduler import scheduler as parse_scheduler
@@ -61,6 +61,22 @@ async def on_startup():
     except Exception as e:
         print(f"⚠️ Ошибка парсинга: {e}")
     
+    # Пинг мониторинга (Healthchecks.io) — раз в 4 мин
+    async def _healthcheck_loop():
+        if not HEALTHCHECK_URL:
+            return
+        import aiohttp
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    await session.get(HEALTHCHECK_URL, timeout=aiohttp.ClientTimeout(total=5))
+            except Exception:
+                pass
+            await asyncio.sleep(240)  # 4 мин
+
+    if HEALTHCHECK_URL:
+        asyncio.create_task(_healthcheck_loop())
+
     print(f"✅ Бот {PROJECT_NAME} запущен!\n")
 
 
