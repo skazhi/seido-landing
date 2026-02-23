@@ -796,6 +796,153 @@ class Database:
             return [dict(row) for row in rows]
 
     # ============================================
+    # АНАЛИТИКА ДЛЯ РАЗРАБОТЧИКА
+    # ============================================
+
+    async def get_developer_analytics(self, section: str = "overview") -> dict:
+        """
+        Развёрнутая аналитика для роли разработчика.
+        section: overview | runners | races | results | claims | feedback | subscriptions
+        """
+        out = {}
+        today = date.today().isoformat()
+
+        if section == "overview":
+            # Общие метрики
+            for name, sql in [
+                ("total_runners", "SELECT COUNT(*) FROM runners"),
+                ("total_races", "SELECT COUNT(*) FROM races"),
+                ("total_results", "SELECT COUNT(*) FROM results"),
+                ("races_with_protocols", "SELECT COUNT(DISTINCT race_id) FROM results"),
+                ("runners_with_telegram", "SELECT COUNT(*) FROM runners WHERE telegram_id IS NOT NULL"),
+                ("total_subscriptions", "SELECT COUNT(*) FROM race_subscriptions"),
+                ("total_feedback", "SELECT COUNT(*) FROM feedback"),
+                ("result_claims_pending", "SELECT COUNT(*) FROM result_claims WHERE status='pending'"),
+                ("result_claims_approved", "SELECT COUNT(*) FROM result_claims WHERE status='approved'"),
+                ("race_submissions_pending", "SELECT COUNT(*) FROM race_submissions WHERE status='pending'"),
+            ]:
+                async with self.db.execute(sql) as c:
+                    out[name] = (await c.fetchone())[0] or 0
+            # Регистрации за период
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM runners WHERE date(created_at) >= date(?, '-7 days')", (today,)
+            ) as c:
+                out["registrations_7d"] = (await c.fetchone())[0] or 0
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM runners WHERE date(created_at) >= date(?, '-30 days')", (today,)
+            ) as c:
+                out["registrations_30d"] = (await c.fetchone())[0] or 0
+            # Забеги по периодам
+            for period, from_d, to_d in [
+                ("races_2023", "2023-01-01", "2024-01-01"),
+                ("races_2024", "2024-01-01", "2025-01-01"),
+                ("races_2025", "2025-01-01", "2026-01-01"),
+                ("races_2026", "2026-01-01", "2027-01-01"),
+                ("races_upcoming", today, "2099-12-31"),
+            ]:
+                async with self.db.execute(
+                    "SELECT COUNT(*) FROM races WHERE date >= ? AND date < ? AND is_active=1",
+                    (from_d, to_d),
+                ) as c:
+                    out[period] = (await c.fetchone())[0] or 0
+
+        elif section == "runners":
+            async with self.db.execute(
+                "SELECT city, COUNT(*) as cnt FROM runners WHERE city IS NOT NULL AND city != '' GROUP BY city ORDER BY cnt DESC LIMIT 15"
+            ) as c:
+                out["top_cities"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT gender, COUNT(*) as cnt FROM runners WHERE gender IS NOT NULL GROUP BY gender"
+            ) as c:
+                out["by_gender"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT date(created_at) as d, COUNT(*) as cnt FROM runners GROUP BY d ORDER BY d DESC LIMIT 14"
+            ) as c:
+                out["registrations_by_day"] = [dict(row) for row in await c.fetchall()]
+            out["total"] = await self.get_total_runners()
+
+        elif section == "races":
+            async with self.db.execute(
+                "SELECT organizer, COUNT(*) as cnt FROM races WHERE organizer IS NOT NULL AND organizer != '' AND is_active=1 GROUP BY organizer ORDER BY cnt DESC LIMIT 15"
+            ) as c:
+                out["by_organizer"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT race_type, COUNT(*) as cnt FROM races WHERE race_type IS NOT NULL AND is_active=1 GROUP BY race_type ORDER BY cnt DESC"
+            ) as c:
+                out["by_type"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT location, COUNT(*) as cnt FROM races WHERE location IS NOT NULL AND location != '' AND is_active=1 GROUP BY location ORDER BY cnt DESC LIMIT 10"
+            ) as c:
+                out["top_locations"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM races WHERE protocol_url IS NOT NULL AND protocol_url != '' AND is_active=1"
+            ) as c:
+                out["with_protocol_url"] = (await c.fetchone())[0] or 0
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM races r WHERE EXISTS (SELECT 1 FROM results res WHERE res.race_id=r.id) AND r.is_active=1"
+            ) as c:
+                out["with_imported_results"] = (await c.fetchone())[0] or 0
+            out["total"] = await self.get_total_races()
+
+        elif section == "results":
+            out["total"] = await self.get_total_results()
+            async with self.db.execute(
+                "SELECT rac.name, rac.date, COUNT(res.id) as cnt FROM results res JOIN races rac ON res.race_id=rac.id GROUP BY res.race_id ORDER BY cnt DESC LIMIT 10"
+            ) as c:
+                out["top_races_by_results"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT distance, COUNT(*) as cnt FROM results WHERE distance IS NOT NULL AND distance != '' GROUP BY distance ORDER BY cnt DESC LIMIT 15"
+            ) as c:
+                out["by_distance"] = [dict(row) for row in await c.fetchall()]
+
+        elif section == "claims":
+            async with self.db.execute(
+                "SELECT status, COUNT(*) as cnt FROM result_claims GROUP BY status"
+            ) as c:
+                out["by_status"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                """SELECT rc.id, rc.status, rc.created_at, res.distance, res.overall_place,
+                          rac.name as race_name, rac.date,
+                          ru.last_name || ' ' || ru.first_name as runner_name
+                   FROM result_claims rc
+                   JOIN results res ON rc.result_id=res.id
+                   JOIN races rac ON res.race_id=rac.id
+                   JOIN runners ru ON rc.runner_id=ru.id
+                   WHERE rc.status='pending'
+                   ORDER BY rc.created_at DESC LIMIT 10"""
+            ) as c:
+                rows = await c.fetchall()
+                out["pending_claims"] = [dict(row) for row in rows]
+            async with self.db.execute("SELECT COUNT(*) FROM result_claims") as c:
+                out["total"] = (await c.fetchone())[0] or 0
+
+        elif section == "feedback":
+            async with self.db.execute(
+                "SELECT id, telegram_id, text, created_at FROM feedback ORDER BY created_at DESC LIMIT 20"
+            ) as c:
+                out["recent"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute("SELECT COUNT(*) FROM feedback") as c:
+                out["total"] = (await c.fetchone())[0] or 0
+
+        elif section == "subscriptions":
+            async with self.db.execute(
+                "SELECT status, COUNT(*) as cnt FROM race_subscriptions GROUP BY status"
+            ) as c:
+                out["by_status"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT rac.name, rac.date, COUNT(rs.id) as cnt FROM race_subscriptions rs JOIN races rac ON rs.race_id=rac.id WHERE rac.date >= date('now') GROUP BY rs.race_id ORDER BY cnt DESC LIMIT 10"
+            ) as c:
+                out["top_races"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute("SELECT COUNT(*) FROM race_submissions") as c:
+                out["race_submissions_total"] = (await c.fetchone())[0] or 0
+            async with self.db.execute(
+                "SELECT status, COUNT(*) as cnt FROM race_submissions GROUP BY status"
+            ) as c:
+                out["race_submissions_by_status"] = [dict(row) for row in await c.fetchall()]
+
+        return out
+
+    # ============================================
     # ПОДПИСКИ НА ЗАБЕГИ
     # ============================================
 

@@ -11,6 +11,9 @@ ADMINS = [
     int(os.getenv('ADMIN_ID', 0)),  # Твой ID
 ]
 
+# Разработчик (полная аналитика) — тот же ADMIN_ID
+DEVELOPER_ID = int(os.getenv('ADMIN_ID', 0))
+
 # Названия проекта
 PROJECT_NAME = "Seido"
 PROJECT_TAGLINE = "Засейди свои результаты"

@@ -11,7 +11,7 @@ from aiogram.types import (
 )
 
 from db import db
-from config import PROJECT_NAME, PROJECT_TAGLINE, ADMINS
+from config import PROJECT_NAME, PROJECT_TAGLINE, ADMINS, DEVELOPER_ID
 from parsers.scheduler import run_parse
 
 router = Router()
@@ -1669,3 +1669,152 @@ async def cmd_admin_feedback(message: types.Message):
         )
 
     await message.answer(response[:4000])
+
+
+# ============================================
+# РАЗРАБОТЧИК: Полная аналитика
+# ============================================
+def _format_dev_overview(data: dict) -> str:
+    t = "📊 **Обзор сервиса**\n\n"
+    t += "👥 **Пользователи**\n"
+    t += f"• Бегунов всего: {data.get('total_runners', 0)}\n"
+    t += f"• С Telegram (активных): {data.get('runners_with_telegram', 0)}\n"
+    t += f"• Регистрации за 7 дней: {data.get('registrations_7d', 0)}\n"
+    t += f"• Регистрации за 30 дней: {data.get('registrations_30d', 0)}\n\n"
+    t += "🏁 **Забеги**\n"
+    t += f"• Всего: {data.get('total_races', 0)}\n"
+    t += f"• С импорт. протоколами: {data.get('races_with_protocols', 0)}\n"
+    t += f"• 2023: {data.get('races_2023', 0)} | 2024: {data.get('races_2024', 0)}\n"
+    t += f"• 2025: {data.get('races_2025', 0)} | 2026: {data.get('races_2026', 0)}\n"
+    t += f"• Предстоящих: {data.get('races_upcoming', 0)}\n\n"
+    t += "📈 **Результаты и действия**\n"
+    t += f"• Результатов в БД: {data.get('total_results', 0)}\n"
+    t += f"• Подписок: {data.get('total_subscriptions', 0)}\n"
+    t += f"• Обратной связи: {data.get('total_feedback', 0)}\n"
+    t += f"• Заявок «это я» pending: {data.get('result_claims_pending', 0)}\n"
+    t += f"• Заявок «это я» approved: {data.get('result_claims_approved', 0)}\n"
+    t += f"• Заявок на забеги pending: {data.get('race_submissions_pending', 0)}\n\n"
+    t += "_⚠ Время в боте, кол-во запросов по командам — требуют таблицы events (логирование)_"
+    return t
+
+
+def _format_dev_section(section: str, data: dict) -> str:
+    if section == "overview":
+        return _format_dev_overview(data)
+    if section == "runners":
+        t = "👥 **Бегуны**\n\n"
+        t += f"Всего: {data.get('total', 0)}\n\n"
+        if data.get("top_cities"):
+            t += "🏙 Топ городов:\n"
+            for r in data["top_cities"][:10]:
+                t += f"  {r['city']}: {r['cnt']}\n"
+        if data.get("by_gender"):
+            t += "\nПол: " + ", ".join(f"{r['gender']}={r['cnt']}" for r in data["by_gender"]) + "\n"
+        if data.get("registrations_by_day"):
+            t += "\nРег. по дням (14 дн):\n"
+            for r in data["registrations_by_day"][:7]:
+                t += f"  {r['d']}: {r['cnt']}\n"
+        return t
+    if section == "races":
+        t = "🏁 **Забеги**\n\n"
+        t += f"Всего: {data.get('total', 0)}\n"
+        t += f"С protocol_url: {data.get('with_protocol_url', 0)}\n"
+        t += f"С импорт. результатами: {data.get('with_imported_results', 0)}\n\n"
+        if data.get("by_organizer"):
+            t += "По организаторам:\n"
+            for r in data["by_organizer"][:10]:
+                t += f"  {r['organizer']}: {r['cnt']}\n"
+        if data.get("by_type"):
+            t += "\nПо типу: " + ", ".join(f"{r['race_type']}={r['cnt']}" for r in data["by_type"]) + "\n"
+        if data.get("top_locations"):
+            t += "\nТоп локаций:\n"
+            for r in data["top_locations"][:5]:
+                t += f"  {r['location']}: {r['cnt']}\n"
+        return t
+    if section == "results":
+        t = "📈 **Результаты**\n\n"
+        t += f"Всего: {data.get('total', 0)}\n\n"
+        if data.get("top_races_by_results"):
+            t += "Забеги по кол-ву результатов:\n"
+            for r in data["top_races_by_results"][:8]:
+                name = (r.get("name") or "")[:35]
+                t += f"  {name} ({r.get('date','')}): {r['cnt']}\n"
+        if data.get("by_distance"):
+            t += "\nПо дистанциям:\n"
+            for r in data["by_distance"][:10]:
+                t += f"  {r['distance']}: {r['cnt']}\n"
+        return t
+    if section == "claims":
+        t = "🔗 **Заявки «это я»**\n\n"
+        t += f"Всего: {data.get('total', 0)}\n"
+        for r in data.get("by_status", []):
+            t += f"  {r['status']}: {r['cnt']}\n"
+        if data.get("pending_claims"):
+            t += "\nPending (последние):\n"
+            for c in data["pending_claims"][:5]:
+                t += f"  #{c['id']} {c['runner_name']} — {c['race_name']} ({c['distance']})\n"
+        return t
+    if section == "feedback":
+        t = "💬 **Обратная связь**\n\n"
+        t += f"Всего: {data.get('total', 0)}\n\n"
+        for fb in data.get("recent", [])[:8]:
+            txt = (fb.get("text", "") or "")[:80]
+            if len(txt) >= 80:
+                txt += "…"
+            t += f"tg:{fb.get('telegram_id','?')} | {fb.get('created_at','')}\n{txt}\n\n"
+        return t
+    if section == "subscriptions":
+        t = "📋 **Подписки и заявки**\n\n"
+        for r in data.get("by_status", []):
+            t += f"Подписки {r['status']}: {r['cnt']}\n"
+        t += f"\nЗаявок на забеги: {data.get('race_submissions_total', 0)}\n"
+        for r in data.get("race_submissions_by_status", []):
+            t += f"  {r['status']}: {r['cnt']}\n"
+        if data.get("top_races"):
+            t += "\nТоп забегов по подпискам:\n"
+            for r in data["top_races"][:8]:
+                name = (r.get("name") or "")[:30]
+                t += f"  {name} ({r.get('date','')}): {r['cnt']}\n"
+        return t
+    return "Нет данных"
+
+
+def _get_developer_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Обзор", callback_data="dev:overview")],
+        [InlineKeyboardButton(text="👥 Бегуны", callback_data="dev:runners"),
+         InlineKeyboardButton(text="🏁 Забеги", callback_data="dev:races")],
+        [InlineKeyboardButton(text="📈 Результаты", callback_data="dev:results"),
+         InlineKeyboardButton(text="🔗 Заявки «это я»", callback_data="dev:claims")],
+        [InlineKeyboardButton(text="💬 Обратная связь", callback_data="dev:feedback"),
+         InlineKeyboardButton(text="📋 Подписки", callback_data="dev:subscriptions")],
+    ])
+
+
+@router.message(Command("developer"))
+@router.message(Command("dev"))
+async def cmd_developer(message: types.Message):
+    """Меню аналитики для разработчика (только DEVELOPER_ID из .env ADMIN_ID)"""
+    if message.from_user.id != DEVELOPER_ID or DEVELOPER_ID == 0:
+        await message.answer("⚠️ Эта команда недоступна.")
+        return
+
+    data = await db.get_developer_analytics("overview")
+    text = _format_dev_overview(data)
+    text += "\n_Выбери раздел для детализации:_"
+    await message.answer(text, reply_markup=_get_developer_menu_kb())
+
+
+@router.callback_query(F.data.startswith("dev:"))
+async def cb_developer_section(callback: CallbackQuery):
+    """Детализация по разделам аналитики"""
+    if callback.from_user.id != DEVELOPER_ID or DEVELOPER_ID == 0:
+        await callback.answer("Нет доступа")
+        return
+
+    section = callback.data.split(":")[1] if ":" in callback.data else "overview"
+    data = await db.get_developer_analytics(section)
+    text = _format_dev_section(section, data)
+    text += "\n_◀ Меню: /developer_"
+    await callback.message.edit_text(text, reply_markup=_get_developer_menu_kb())
+    await callback.answer()
