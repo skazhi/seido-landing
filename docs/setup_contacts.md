@@ -13,7 +13,7 @@
 ## Рекомендация
 
 **Достаточно:** один из вариантов:
-- **Email** (у вас: Seido_community@mail.ru)
+- **Email** (у вас: seido.community@yandex.ru)
 - **Telegram @Skazhi** (у тебя уже есть)
 
 Можно указать оба: «По вопросам персональных данных: email или @Skazhi в Telegram».

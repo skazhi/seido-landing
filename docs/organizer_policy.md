@@ -10,7 +10,7 @@ Seido — это единая платформа для бегунов Росс�
 
 **Сайт:** https://skazhi.github.io/seido-landing/  
 **Telegram-бот:** @seidocommunitybot  
-**Контакты:** Telegram @Skazhi, Seido_community@mail.ru
+**Контакты:** Telegram @Skazhi, seido.community@yandex.ru
 
 ---
 
@@ -60,7 +60,7 @@ Seido использует данные из следующих источник
 ### 📋 Как связаться
 
 - **Telegram:** @Skazhi
-- **Email:** Seido_community@mail.ru
+- **Email:** seido.community@yandex.ru
 - **Через бота:** отправьте сообщение администратору
 
 ---

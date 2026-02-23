@@ -126,7 +126,7 @@
 
 7.3. Контакты для связи (вопросы, претензии, удаление данных):
 - Telegram: @Skazhi
-- Email: Seido_community@mail.ru
+- Email: seido.community@yandex.ru
 
 ---
 

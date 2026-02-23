@@ -475,7 +475,7 @@ seido/
 | Telegram-бот | @SeidocommunityBot |
 | Instagram | seido_community |
 | VK | vk.com/seido_community |
-| Email | Seido_community@mail.ru |
+| Email | seido.community@yandex.ru |
 
 Описания, эмодзи, единый стиль: `docs/BRANDING.md`
 

@@ -54,9 +54,8 @@
 - Имя страницы: **Seido** | описание в шапке
 
 ### Почта
-- **Текущее:** Seido_community@mail.ru ✅
+- **Текущее:** seido.community@yandex.ru ✅
 - Для официальных писем лучше: **hello@seido.ru** или **support@seido.ru** (когда будет домен)
-- Пока Seido_community@mail.ru подходит
 
 ---
 
@@ -163,7 +162,7 @@
 | Telegram-бот | @SeidocommunityBot |
 | Instagram | seido_community |
 | VK | vk.com/seido_community |
-| Email | Seido_community@mail.ru |
+| Email | seido.community@yandex.ru |
 
 ---
 
