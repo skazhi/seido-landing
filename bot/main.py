@@ -4,13 +4,21 @@ Seido Bot - Главный файл запуска
 import asyncio
 import logging
 import sys
+import os
+from datetime import datetime
 
 # Исправление кодировки для Windows
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
+# Создаём папку для логов
+LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Имя файла лога с датой
+LOG_FILE = os.path.join(LOG_DIR, f"bot_{datetime.now().strftime('%Y%m%d')}.log")
+
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 from config import BOT_TOKEN, PROJECT_NAME, HEALTHCHECK_URL
@@ -19,10 +27,23 @@ from handlers import router
 from parsers.scheduler import scheduler as parse_scheduler
 
 # Настройка логгирования
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+# Формат: дата/время - уровень - сообщение
+log_format = "%(asctime)s - %(levelname)s - %(message)s"
+date_format = "%Y-%m-%d %H:%M:%S"
+
+# Настройка логирования: и в консоль, и в файл
+logging.basicConfig(
+    level=logging.INFO,
+    format=log_format,
+    datefmt=date_format,
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 # Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.MARKDOWN)
 dp = Dispatcher()
 
 # Регистрируем роутер с обработчиками

@@ -38,3 +38,5 @@ backups/
 
 # Logs
 *.log
+bot/logs/
+logs/
