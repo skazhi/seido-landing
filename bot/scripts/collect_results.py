@@ -87,20 +87,26 @@ async def run_collect(
     runc_limit: int = 200,
     raceresult_limit: int = 100,
     rr_limit: int = 100,
+    date_to: str | None = None,
 ):
     """Основная логика сбора (db должна быть подключена).
     exclude_rr_5verst_s95: исключить RussiaRunning, 5верст, S95
     max_races: макс. забегов за прогон
-    runc_limit, raceresult_limit, rr_limit: лимиты по источникам за прогон
+    date_to: только забеги до этой даты (YYYY-MM-DD), для приоритета старого
     """
+    where = "date < date('now') AND protocol_url IS NOT NULL AND protocol_url != ''"
+    params = []
+    if date_to:
+        where += " AND date <= ?"
+        params.append(date_to)
     sql = f"""
         SELECT id, name, date, location, organizer, race_type, protocol_url, website_url
         FROM races
-        WHERE date < date('now') AND protocol_url IS NOT NULL AND protocol_url != ''
+        WHERE {where}
         ORDER BY date DESC
         LIMIT {max_races}
     """
-    async with db.db.execute(sql) as cursor:
+    async with db.db.execute(sql, params) as cursor:
         all_races = [dict(row) for row in await cursor.fetchall()]
 
     if exclude_rr_5verst_s95:
@@ -265,6 +271,8 @@ async def main():
                         help="Лимит RaceResult за прогон (default: 100)")
     parser.add_argument("--rr-limit", type=int, default=100,
                         help="Лимит RussiaRunning за прогон при включённом RR (default: 100)")
+    parser.add_argument("--date-to", type=str,
+                        help="Только забеги до даты (YYYY-MM-DD), например 2024-01-01 для 2023")
     parser.add_argument("--loop", type=int, default=1,
                         help="Запустить N раз подряд (для долгого сбора)")
     args = parser.parse_args()
@@ -278,6 +286,7 @@ async def main():
             runc_limit=args.runc_limit,
             raceresult_limit=args.raceresult_limit,
             rr_limit=args.rr_limit,
+            date_to=args.date_to,
         )
         if i < args.loop - 1:
             import time

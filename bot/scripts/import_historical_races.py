@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Seido — импорт исторических забегов в РФ за период 01.01.2024 — 22.02.2026
-Без парсинга финишных протоколов. Дубликаты не создаются.
+Seido — импорт исторических забегов в РФ
+Дубликаты не создаются. Для RR сохраняем protocol_url для последующего сбора протоколов.
 Запуск: python -m bot.scripts.import_historical_races
+        python -m bot.scripts.import_historical_races --period 2023
 """
+import argparse
 import asyncio
 import json
 import logging
@@ -20,8 +22,11 @@ from bot.db import db
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
-DATE_FROM = "2024-01-01"
-DATE_TO = "2026-02-22"
+# Периоды по умолчанию
+PERIODS = {
+    "2024_2026": ("2024-01-01", "2026-02-22"),
+    "2023": ("2023-01-01", "2024-01-01"),
+}
 RR_API_URL = "https://russiarunning.com/api/events/list/ru"
 RR_HEADERS = {
     "Content-Type": "application/json",
@@ -64,11 +69,13 @@ async def fetch_rr_events(date_from: str, date_to: str) -> list[dict]:
                 if event_date < date_from_dt or event_date > date_to_dt:
                     continue
 
+                event_id = item.get("c", "")
                 events.append({
                     "name": (item.get("t") or "").strip(),
                     "date": event_date_str,
                     "location": (item.get("p") or "").strip(),
-                    "url": f"https://russiarunning.com/event/{item.get('c', '')}/",
+                    "url": f"https://russiarunning.com/event/{event_id}/",
+                    "protocol_url": f"https://results.russiarunning.com/event/{event_id}/" if event_id else "",
                     "organizer": "RussiaRunning",
                 })
 
@@ -81,6 +88,25 @@ async def fetch_rr_events(date_from: str, date_to: str) -> list[dict]:
             await asyncio.sleep(0.5)  # вежливая пауза
 
     return events
+
+
+def _static_events_2023() -> list[dict]:
+    """Забеги RunC, WildTrail за 2023"""
+    return [
+        {"name": "Московский марафон", "date": "2023-10-15", "location": "Москва",
+         "url": "https://moscowmarathon.runc.run/", "organizer": "Беговое сообщество",
+         "protocol_url": "https://results.runc.run/event/moscow_marathon_42,2km_2023/overview/"},
+        {"name": "Марафон «Белые ночи»", "date": "2023-07-02", "location": "Санкт-Петербург",
+         "url": "https://whitenightsmarathon.ru/", "organizer": "Беговое сообщество",
+         "protocol_url": "https://results.runc.run/event/whitenights_2023/overview/"},
+        {"name": "Московский полумарафон", "date": "2023-04-23", "location": "Москва",
+         "url": "https://moscowhalf.runc.run/", "organizer": "Беговое сообщество",
+         "protocol_url": "https://results.runc.run/event/moscow_half_2023/overview/"},
+        {"name": "Arkhyz Wild Trail", "date": "2023-06-23", "location": "Архыз",
+         "url": "https://wildtrail.ru/awt", "organizer": "Wild Trail", "protocol_url": "https://wildtrail.ru/results"},
+        {"name": "Rosa Wild Fest", "date": "2023-09-02", "location": "Сочи",
+         "url": "https://wildtrail.ru/rwt", "organizer": "Wild Trail", "protocol_url": "https://wildtrail.ru/results"},
+    ]
 
 
 def _static_events_2024_2025() -> list[dict]:
@@ -120,6 +146,22 @@ def _static_events_2024_2025() -> list[dict]:
     return runc + wildtrail
 
 
+def _get_static_events(date_from: str, date_to: str) -> list[dict]:
+    """Статические забеги в заданном периоде"""
+    all_static = _static_events_2023() + _static_events_2024_2025()
+    from_dt = datetime.strptime(date_from, "%Y-%m-%d").date()
+    to_dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+    result = []
+    for ev in all_static:
+        try:
+            d = datetime.strptime(ev["date"], "%Y-%m-%d").date()
+            if from_dt <= d < to_dt:
+                result.append(ev)
+        except ValueError:
+            continue
+    return result
+
+
 async def load_existing_keys() -> tuple[set[str], set[tuple[str, str]]]:
     """Загрузить в память существующие URL и (name, date) для быстрой проверки дубликатов"""
     urls = set()
@@ -138,10 +180,23 @@ async def load_existing_keys() -> tuple[set[str], set[tuple[str, str]]]:
 
 
 async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--period", choices=list(PERIODS.keys()), default="2024_2026",
+                        help="Период: 2024_2026 (по умолч.) или 2023")
+    parser.add_argument("--date-from", help="Начало периода (YYYY-MM-DD)")
+    parser.add_argument("--date-to", help="Конец периода (YYYY-MM-DD)")
+    args = parser.parse_args()
+
+    if args.date_from and args.date_to:
+        date_from, date_to = args.date_from, args.date_to
+    else:
+        date_from, date_to = PERIODS[args.period]
+    logger.info(f"Период: {date_from} — {date_to}")
+
     await db.connect()
 
     urls, name_dates = await load_existing_keys()
-    logger.info(f"В БД уже есть {len(urls)} забегов с URL, проверка дубликатов по (name,date)")
+    logger.info(f"В БД уже есть забегов с URL, проверка дубликатов по (name,date)")
 
     total_added = 0
 
@@ -160,7 +215,7 @@ async def main():
 
     # 1. RussiaRunning
     logger.info("RussiaRunning: загрузка событий...")
-    rr_events = await fetch_rr_events(DATE_FROM, DATE_TO)
+    rr_events = await fetch_rr_events(date_from, date_to)
     logger.info(f"RussiaRunning: получено {len(rr_events)} событий в периоде")
 
     to_insert = []
@@ -178,7 +233,7 @@ async def main():
             "location": ev.get("location", ""),
             "organizer": ev.get("organizer", "RussiaRunning"),
             "website_url": url,
-            "protocol_url": "",
+            "protocol_url": (ev.get("protocol_url") or "").strip(),
         })
         mark_added(name, date_str, url)
 
@@ -195,7 +250,7 @@ async def main():
     logger.info(f"RussiaRunning: добавлено {total_added} новых забегов")
 
     # 2. RunC, WildTrail и др. (статический список)
-    static = _static_events_2024_2025()
+    static = _get_static_events(date_from, date_to)
     static_to_insert = []
     for ev in static:
         name = (ev.get("name") or "").strip()
