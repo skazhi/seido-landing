@@ -10,7 +10,10 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from aiogram import Bot, Dispatcher
-from config import BOT_TOKEN, PROJECT_NAME
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
+from config import BOT_TOKEN, PROJECT_NAME, HEALTHCHECK_URL
 from db import db
 from handlers import router
 from parsers.scheduler import scheduler as parse_scheduler
@@ -19,7 +22,7 @@ from parsers.scheduler import scheduler as parse_scheduler
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 # Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN))
 dp = Dispatcher()
 
 # Регистрируем роутер с обработчиками
@@ -30,7 +33,22 @@ async def on_startup():
     """Действия при запуске"""
     print(f"\n🚀 Запуск бота {PROJECT_NAME}...")
     await db.connect()
-    
+
+    # Меню команд (видны при нажатии /)
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="myresults", description="Мои результаты"),
+        BotCommand(command="find_result", description="Найти результат по ФИО"),
+        BotCommand(command="profile", description="Мой профиль"),
+        BotCommand(command="calendar", description="Календарь забегов"),
+        BotCommand(command="search", description="Поиск забегов"),
+        BotCommand(command="history", description="История забегов"),
+        BotCommand(command="compare", description="Сравнение с бегуном"),
+        BotCommand(command="addrace", description="Добавить забег"),
+        BotCommand(command="stats", description="Статистика"),
+        BotCommand(command="help", description="Помощь"),
+    ])
+
     # Запуск планировщика парсинга
     parse_scheduler.start()
     
@@ -43,6 +61,22 @@ async def on_startup():
     except Exception as e:
         print(f"⚠️ Ошибка парсинга: {e}")
     
+    # Пинг мониторинга (Healthchecks.io) — раз в 4 мин
+    async def _healthcheck_loop():
+        if not HEALTHCHECK_URL:
+            return
+        import aiohttp
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    await session.get(HEALTHCHECK_URL, timeout=aiohttp.ClientTimeout(total=5))
+            except Exception:
+                pass
+            await asyncio.sleep(240)  # 4 мин
+
+    if HEALTHCHECK_URL:
+        asyncio.create_task(_healthcheck_loop())
+
     print(f"✅ Бот {PROJECT_NAME} запущен!\n")
 
 

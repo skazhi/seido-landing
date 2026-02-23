@@ -117,10 +117,69 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_runners_last_name ON runners(last_name);
         CREATE INDEX IF NOT EXISTS idx_runners_telegram ON runners(telegram_id);
         CREATE INDEX IF NOT EXISTS idx_races_date ON races(date);
+        CREATE INDEX IF NOT EXISTS idx_races_organizer ON races(organizer);
         CREATE INDEX IF NOT EXISTS idx_results_runner ON results(runner_id);
         CREATE INDEX IF NOT EXISTS idx_results_race ON results(race_id);
+
+        -- Организаторы (для будущей регистрации и привязки данных)
+        -- См. docs/ORGANIZERS.md
+        CREATE TABLE IF NOT EXISTS organizers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            canonical_name TEXT UNIQUE NOT NULL,
+            display_name TEXT,
+            website TEXT,
+            contact_email TEXT,
+            contact_telegram TEXT,
+            seido_user_id INTEGER,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_organizers_canonical ON organizers(canonical_name);
+
+        -- Заявки на привязку результата («это я»)
+        CREATE TABLE IF NOT EXISTS result_claims (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            result_id INTEGER NOT NULL REFERENCES results(id) ON DELETE CASCADE,
+            runner_id INTEGER NOT NULL REFERENCES runners(id) ON DELETE CASCADE,
+            telegram_id INTEGER,
+            status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+            admin_comment TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at TIMESTAMP,
+            reviewed_by INTEGER,
+            UNIQUE(result_id, runner_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_result_claims_status ON result_claims(status);
+
+        -- Обратная связь от пользователей (feedback)
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            runner_id INTEGER REFERENCES runners(id) ON DELETE SET NULL,
+            telegram_id INTEGER,
+            text TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """)
         await self.db.commit()
+
+        # Миграция: добавить organizer_id в races (если ещё нет)
+        try:
+            await self.db.execute(
+                "ALTER TABLE races ADD COLUMN organizer_id INTEGER REFERENCES organizers(id)"
+            )
+            await self.db.commit()
+        except Exception:
+            pass
+
+        # Миграция: Юнистар → Беговое сообщество (переименование организатора)
+        try:
+            await self.db.execute(
+                "UPDATE races SET organizer = 'Беговое сообщество' WHERE organizer = 'Юнистар'"
+            )
+            await self.db.commit()
+        except Exception:
+            pass
 
     # ============================================
     # БЕГУНЫ (RUNNERS)
@@ -139,23 +198,21 @@ class Database:
         self,
         last_name: str,
         first_name: str,
-        birth_date: Optional[str] = None
+        birth_date: Optional[str] = None,
+        prefer_telegram: bool = True
     ) -> Optional[Dict]:
-        """Найти бегуна по имени и фамилии"""
+        """Найти бегуна по имени и фамилии. prefer_telegram: при нескольких — вернуть с telegram_id."""
         if birth_date:
-            async with self.db.execute(
-                "SELECT * FROM runners WHERE last_name = ? AND first_name = ? AND birth_date = ?",
-                (last_name, first_name, birth_date)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return dict(row) if row else None
+            sql = "SELECT * FROM runners WHERE last_name = ? AND first_name = ? AND birth_date = ?"
+            params = (last_name, first_name, birth_date)
         else:
-            async with self.db.execute(
-                "SELECT * FROM runners WHERE last_name = ? AND first_name = ?",
-                (last_name, first_name)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return dict(row) if row else None
+            sql = "SELECT * FROM runners WHERE last_name = ? AND first_name = ?"
+            params = (last_name, first_name)
+        if prefer_telegram:
+            sql += " ORDER BY CASE WHEN telegram_id IS NOT NULL THEN 0 ELSE 1 END"
+        async with self.db.execute(sql, params) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
     async def create_runner(
         self,
@@ -165,14 +222,16 @@ class Database:
         birth_date: Optional[str] = None,
         gender: Optional[str] = None,
         city: Optional[str] = None,
+        middle_name: Optional[str] = None,
+        club_name: Optional[str] = None,
     ) -> int:
         """Создать нового бегуна"""
         cursor = await self.db.execute(
             """
-            INSERT INTO runners (telegram_id, first_name, last_name, birth_date, gender, city)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO runners (telegram_id, first_name, last_name, middle_name, birth_date, gender, city, club_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (telegram_id, first_name, last_name, birth_date, gender, city)
+            (telegram_id, first_name, last_name, middle_name, birth_date, gender, city, club_name)
         )
         await self.db.commit()
         return cursor.lastrowid
@@ -198,7 +257,7 @@ class Database:
     # ============================================
 
     async def get_upcoming_races(self, limit: int = 10) -> List[Dict]:
-        """Получить предстоящие забеги"""
+        """Получить предстоящие забеги (анонсы)"""
         async with self.db.execute(
             """
             SELECT * FROM races
@@ -210,6 +269,87 @@ class Database:
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+    
+    async def get_past_races(self, limit: int = 20) -> List[Dict]:
+        """Получить прошедшие забеги"""
+        async with self.db.execute(
+            """
+            SELECT r.*, 
+                   COUNT(res.id) as results_count
+            FROM races r
+            LEFT JOIN results res ON r.id = res.race_id
+            WHERE r.date < date('now') AND r.is_active = 1
+            GROUP BY r.id
+            ORDER BY r.date DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_races_with_results(self, limit: int = 20) -> List[Dict]:
+        """Получить забеги с результатами"""
+        async with self.db.execute(
+            """
+            SELECT r.*, 
+                   COUNT(res.id) as results_count
+            FROM races r
+            INNER JOIN results res ON r.id = res.race_id
+            WHERE r.is_active = 1
+            GROUP BY r.id
+            HAVING results_count > 0
+            ORDER BY r.date DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    
+    async def get_race_status(self, race_id: int) -> Dict[str, any]:
+        """
+        Определить статус забега
+        
+        Returns:
+            Словарь с полями:
+            - status: 'upcoming', 'past', 'completed'
+            - results_count: количество результатов
+            - has_results: есть ли результаты
+        """
+        race = await self.get_race_by_id(race_id)
+        if not race:
+            return {'status': 'unknown', 'results_count': 0, 'has_results': False}
+        
+        from datetime import date, datetime
+        race_date = datetime.fromisoformat(race['date']).date() if isinstance(race['date'], str) else race['date']
+        today = date.today()
+        
+        # Подсчёт результатов
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM results WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            results_count = row[0] if row else 0
+        
+        has_results = results_count > 0
+        is_past = race_date < today
+        
+        if is_past and has_results:
+            status = 'completed'
+        elif is_past:
+            status = 'past'
+        else:
+            status = 'upcoming'
+        
+        return {
+            'status': status,
+            'results_count': results_count,
+            'has_results': has_results,
+            'race_date': race_date,
+            'is_past': is_past
+        }
 
     async def get_race_by_id(self, race_id: int) -> Optional[Dict]:
         """Получить забег по ID"""
@@ -234,6 +374,87 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+    async def get_races_filtered(
+        self,
+        city: Optional[str] = None,
+        race_type: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        distance: Optional[str] = None,
+        organizer: Optional[str] = None,
+        query: Optional[str] = None,
+        upcoming_only: bool = True,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> tuple[List[Dict], int]:
+        """
+        Забеги с фильтрами и пагинацией.
+        Returns: (races, total_count)
+        """
+        conditions = ["is_active = 1"]
+        params: list = []
+
+        if upcoming_only:
+            conditions.append("date >= date('now')")
+        else:
+            conditions.append("date < date('now')")
+
+        if city:
+            conditions.append("location LIKE ?")
+            params.append(f"%{city}%")
+        if race_type:
+            conditions.append("race_type = ?")
+            params.append(race_type)
+        if date_from:
+            conditions.append("date >= ?")
+            params.append(date_from)
+        if date_to:
+            conditions.append("date <= ?")
+            params.append(date_to)
+        if distance:
+            conditions.append("distances LIKE ?")
+            params.append(f"%{distance}%")
+        if organizer:
+            conditions.append("organizer LIKE ?")
+            params.append(f"%{organizer}%")
+        if query:
+            conditions.append("(name LIKE ? OR organizer LIKE ? OR location LIKE ?)")
+            q = f"%{query}%"
+            params.extend([q, q, q])
+
+        where = " AND ".join(conditions)
+        order = "ORDER BY date ASC" if upcoming_only else "ORDER BY date DESC"
+
+        # Подсчёт всего
+        async with self.db.execute(
+            f"SELECT COUNT(*) FROM races WHERE {where}",
+            params
+        ) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+
+        params.extend([limit, offset])
+        async with self.db.execute(
+            f"""
+            SELECT * FROM races
+            WHERE {where}
+            {order}
+            LIMIT ? OFFSET ?
+            """,
+            params
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows], total
+
+    async def get_race_by_id(self, race_id: int) -> Optional[Dict]:
+        """Получить забег по ID (для карточки забега)"""
+        async with self.db.execute(
+            "SELECT * FROM races WHERE id = ? AND is_active = 1",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_race_by_url(self, url: str) -> Optional[Dict]:
         """Получить забег по URL (для проверки на дубликат)"""
         if not url:
@@ -244,6 +465,47 @@ class Database:
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
+
+    async def get_race_by_name_date(self, name: str, date_str: str) -> Optional[Dict]:
+        """Получить забег по названию и дате (для проверки дубликата)"""
+        if not name or not date_str:
+            return None
+        async with self.db.execute(
+            "SELECT * FROM races WHERE name = ? AND date = ?",
+            (name.strip(), date_str)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_race_results(
+        self, race_id: int, limit: int = 30, offset: int = 0
+    ) -> tuple[List[Dict], int]:
+        """
+        Финишный протокол забега: список результатов с ФИО бегунов.
+        Returns: (results, total_count)
+        """
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM results WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+
+        async with self.db.execute(
+            """
+            SELECT r.id as result_id, r.runner_id, r.distance, r.finish_time, r.finish_time_seconds,
+                   r.overall_place, r.gender_place, r.total_runners,
+                   ru.last_name, ru.first_name, ru.middle_name, ru.birth_date, ru.telegram_id
+            FROM results r
+            JOIN runners ru ON r.runner_id = ru.id
+            WHERE r.race_id = ?
+            ORDER BY (r.overall_place IS NULL), r.overall_place ASC, r.finish_time_seconds ASC, r.id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (race_id, limit, offset)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows], total
 
     async def add_race(
         self,
@@ -318,6 +580,145 @@ class Database:
         ) as cursor:
             rows = await cursor.fetchall()
             return [row['distance'] for row in rows]
+
+    async def get_runner_personal_bests(self, runner_id: int) -> List[Dict]:
+        """
+        Личные рекорды бегуна — лучшие результаты по каждой дистанции из базы.
+        Берутся только из протоколов (results), ручной ввод невозможен.
+        """
+        async with self.db.execute(
+            """
+            SELECT r.distance, r.finish_time_seconds, r.finish_time,
+                   rac.name as race_name, rac.date as race_date
+            FROM results r
+            JOIN races rac ON r.race_id = rac.id
+            WHERE r.runner_id = ? AND r.finish_time_seconds IS NOT NULL
+            ORDER BY r.distance, r.finish_time_seconds ASC
+            """,
+            (runner_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+        # Оставляем лучший результат на каждую дистанцию (первый в порядке ASC)
+        seen = {}
+        for row in rows:
+            d = dict(row)
+            dist = d['distance']
+            if dist not in seen:
+                seen[dist] = d
+        return list(seen.values())
+
+    async def search_results_by_name(
+        self,
+        query: str,
+        limit: int = 20
+    ) -> List[Dict]:
+        """Поиск результатов по ФИО бегуна (для «найти мой результат»)"""
+        q = f"%{query.strip()}%"
+        async with self.db.execute(
+            """
+            SELECT r.id as result_id, r.runner_id, r.race_id, r.distance, r.finish_time, r.finish_time_seconds,
+                   r.overall_place, r.total_runners,
+                   ru.last_name, ru.first_name, ru.middle_name, ru.birth_date, ru.telegram_id,
+                   rac.name as race_name, rac.date as race_date, rac.organizer,
+                   rac.protocol_url, rac.website_url
+            FROM results r
+            JOIN runners ru ON r.runner_id = ru.id
+            JOIN races rac ON r.race_id = rac.id
+            WHERE (ru.last_name LIKE ? OR ru.first_name LIKE ? OR ru.middle_name LIKE ?)
+            ORDER BY rac.date DESC
+            LIMIT ?
+            """,
+            (q, q, q, limit)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_result_with_race(self, result_id: int) -> Optional[Dict]:
+        """Результат с данными забега"""
+        async with self.db.execute(
+            """
+            SELECT r.*, rac.name as race_name, rac.date as race_date, rac.organizer,
+                   rac.protocol_url, rac.website_url
+            FROM results r
+            JOIN races rac ON r.race_id = rac.id
+            WHERE r.id = ?
+            """,
+            (result_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def add_result_claim(
+        self,
+        result_id: int,
+        runner_id: int,
+        telegram_id: Optional[int] = None
+    ) -> int:
+        """Создать заявку «это я»"""
+        try:
+            cursor = await self.db.execute(
+                """
+                INSERT INTO result_claims (result_id, runner_id, telegram_id, status)
+                VALUES (?, ?, ?, 'pending')
+                ON CONFLICT(result_id, runner_id) DO NOTHING
+                """,
+                (result_id, runner_id, telegram_id)
+            )
+            await self.db.commit()
+            return cursor.lastrowid
+        except Exception:
+            return 0
+
+    async def get_pending_result_claims(self, limit: int = 50) -> List[Dict]:
+        """Заявки на рассмотрении"""
+        async with self.db.execute(
+            """
+            SELECT rc.*,
+                   ru_claim.last_name, ru_claim.first_name, ru_claim.birth_date,
+                   res.distance, res.finish_time, res.overall_place,
+                   rac.name as race_name, rac.date as race_date, rac.organizer
+            FROM result_claims rc
+            JOIN results res ON rc.result_id = res.id
+            JOIN runners ru_claim ON rc.runner_id = ru_claim.id
+            JOIN races rac ON res.race_id = rac.id
+            WHERE rc.status = 'pending'
+            ORDER BY rc.created_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def approve_result_claim(self, claim_id: int, admin_id: Optional[int] = None) -> bool:
+        """Одобрить заявку: переносим result к runner заявителя"""
+        async with self.db.execute(
+            "SELECT result_id, runner_id FROM result_claims WHERE id = ? AND status = 'pending'",
+            (claim_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row:
+            return False
+        result_id, new_runner_id = row[0], row[1]
+        await self.db.execute(
+            "UPDATE results SET runner_id = ? WHERE id = ?",
+            (new_runner_id, result_id)
+        )
+        await self.db.execute(
+            "UPDATE result_claims SET status = 'approved', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ? WHERE id = ?",
+            (admin_id, claim_id)
+        )
+        await self.db.commit()
+        return True
+
+    async def reject_result_claim(self, claim_id: int, admin_id: Optional[int] = None, comment: str = "") -> bool:
+        """Отклонить заявку"""
+        await self.db.execute(
+            "UPDATE result_claims SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ?, admin_comment = ? WHERE id = ?",
+            (admin_id, comment or None, claim_id)
+        )
+        await self.db.commit()
+        return True
 
     async def add_result(
         self,
@@ -395,6 +796,153 @@ class Database:
             return [dict(row) for row in rows]
 
     # ============================================
+    # АНАЛИТИКА ДЛЯ РАЗРАБОТЧИКА
+    # ============================================
+
+    async def get_developer_analytics(self, section: str = "overview") -> dict:
+        """
+        Развёрнутая аналитика для роли разработчика.
+        section: overview | runners | races | results | claims | feedback | subscriptions
+        """
+        out = {}
+        today = date.today().isoformat()
+
+        if section == "overview":
+            # Общие метрики
+            for name, sql in [
+                ("total_runners", "SELECT COUNT(*) FROM runners"),
+                ("total_races", "SELECT COUNT(*) FROM races"),
+                ("total_results", "SELECT COUNT(*) FROM results"),
+                ("races_with_protocols", "SELECT COUNT(DISTINCT race_id) FROM results"),
+                ("runners_with_telegram", "SELECT COUNT(*) FROM runners WHERE telegram_id IS NOT NULL"),
+                ("total_subscriptions", "SELECT COUNT(*) FROM race_subscriptions"),
+                ("total_feedback", "SELECT COUNT(*) FROM feedback"),
+                ("result_claims_pending", "SELECT COUNT(*) FROM result_claims WHERE status='pending'"),
+                ("result_claims_approved", "SELECT COUNT(*) FROM result_claims WHERE status='approved'"),
+                ("race_submissions_pending", "SELECT COUNT(*) FROM race_submissions WHERE status='pending'"),
+            ]:
+                async with self.db.execute(sql) as c:
+                    out[name] = (await c.fetchone())[0] or 0
+            # Регистрации за период
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM runners WHERE date(created_at) >= date(?, '-7 days')", (today,)
+            ) as c:
+                out["registrations_7d"] = (await c.fetchone())[0] or 0
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM runners WHERE date(created_at) >= date(?, '-30 days')", (today,)
+            ) as c:
+                out["registrations_30d"] = (await c.fetchone())[0] or 0
+            # Забеги по периодам
+            for period, from_d, to_d in [
+                ("races_2023", "2023-01-01", "2024-01-01"),
+                ("races_2024", "2024-01-01", "2025-01-01"),
+                ("races_2025", "2025-01-01", "2026-01-01"),
+                ("races_2026", "2026-01-01", "2027-01-01"),
+                ("races_upcoming", today, "2099-12-31"),
+            ]:
+                async with self.db.execute(
+                    "SELECT COUNT(*) FROM races WHERE date >= ? AND date < ? AND is_active=1",
+                    (from_d, to_d),
+                ) as c:
+                    out[period] = (await c.fetchone())[0] or 0
+
+        elif section == "runners":
+            async with self.db.execute(
+                "SELECT city, COUNT(*) as cnt FROM runners WHERE city IS NOT NULL AND city != '' GROUP BY city ORDER BY cnt DESC LIMIT 15"
+            ) as c:
+                out["top_cities"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT gender, COUNT(*) as cnt FROM runners WHERE gender IS NOT NULL GROUP BY gender"
+            ) as c:
+                out["by_gender"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT date(created_at) as d, COUNT(*) as cnt FROM runners GROUP BY d ORDER BY d DESC LIMIT 14"
+            ) as c:
+                out["registrations_by_day"] = [dict(row) for row in await c.fetchall()]
+            out["total"] = await self.get_total_runners()
+
+        elif section == "races":
+            async with self.db.execute(
+                "SELECT organizer, COUNT(*) as cnt FROM races WHERE organizer IS NOT NULL AND organizer != '' AND is_active=1 GROUP BY organizer ORDER BY cnt DESC LIMIT 15"
+            ) as c:
+                out["by_organizer"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT race_type, COUNT(*) as cnt FROM races WHERE race_type IS NOT NULL AND is_active=1 GROUP BY race_type ORDER BY cnt DESC"
+            ) as c:
+                out["by_type"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT location, COUNT(*) as cnt FROM races WHERE location IS NOT NULL AND location != '' AND is_active=1 GROUP BY location ORDER BY cnt DESC LIMIT 10"
+            ) as c:
+                out["top_locations"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM races WHERE protocol_url IS NOT NULL AND protocol_url != '' AND is_active=1"
+            ) as c:
+                out["with_protocol_url"] = (await c.fetchone())[0] or 0
+            async with self.db.execute(
+                "SELECT COUNT(*) FROM races r WHERE EXISTS (SELECT 1 FROM results res WHERE res.race_id=r.id) AND r.is_active=1"
+            ) as c:
+                out["with_imported_results"] = (await c.fetchone())[0] or 0
+            out["total"] = await self.get_total_races()
+
+        elif section == "results":
+            out["total"] = await self.get_total_results()
+            async with self.db.execute(
+                "SELECT rac.name, rac.date, COUNT(res.id) as cnt FROM results res JOIN races rac ON res.race_id=rac.id GROUP BY res.race_id ORDER BY cnt DESC LIMIT 10"
+            ) as c:
+                out["top_races_by_results"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT distance, COUNT(*) as cnt FROM results WHERE distance IS NOT NULL AND distance != '' GROUP BY distance ORDER BY cnt DESC LIMIT 15"
+            ) as c:
+                out["by_distance"] = [dict(row) for row in await c.fetchall()]
+
+        elif section == "claims":
+            async with self.db.execute(
+                "SELECT status, COUNT(*) as cnt FROM result_claims GROUP BY status"
+            ) as c:
+                out["by_status"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                """SELECT rc.id, rc.status, rc.created_at, res.distance, res.overall_place,
+                          rac.name as race_name, rac.date,
+                          ru.last_name || ' ' || ru.first_name as runner_name
+                   FROM result_claims rc
+                   JOIN results res ON rc.result_id=res.id
+                   JOIN races rac ON res.race_id=rac.id
+                   JOIN runners ru ON rc.runner_id=ru.id
+                   WHERE rc.status='pending'
+                   ORDER BY rc.created_at DESC LIMIT 10"""
+            ) as c:
+                rows = await c.fetchall()
+                out["pending_claims"] = [dict(row) for row in rows]
+            async with self.db.execute("SELECT COUNT(*) FROM result_claims") as c:
+                out["total"] = (await c.fetchone())[0] or 0
+
+        elif section == "feedback":
+            async with self.db.execute(
+                "SELECT id, telegram_id, text, created_at FROM feedback ORDER BY created_at DESC LIMIT 20"
+            ) as c:
+                out["recent"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute("SELECT COUNT(*) FROM feedback") as c:
+                out["total"] = (await c.fetchone())[0] or 0
+
+        elif section == "subscriptions":
+            async with self.db.execute(
+                "SELECT status, COUNT(*) as cnt FROM race_subscriptions GROUP BY status"
+            ) as c:
+                out["by_status"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute(
+                "SELECT rac.name, rac.date, COUNT(rs.id) as cnt FROM race_subscriptions rs JOIN races rac ON rs.race_id=rac.id WHERE rac.date >= date('now') GROUP BY rs.race_id ORDER BY cnt DESC LIMIT 10"
+            ) as c:
+                out["top_races"] = [dict(row) for row in await c.fetchall()]
+            async with self.db.execute("SELECT COUNT(*) FROM race_submissions") as c:
+                out["race_submissions_total"] = (await c.fetchone())[0] or 0
+            async with self.db.execute(
+                "SELECT status, COUNT(*) as cnt FROM race_submissions GROUP BY status"
+            ) as c:
+                out["race_submissions_by_status"] = [dict(row) for row in await c.fetchall()]
+
+        return out
+
+    # ============================================
     # ПОДПИСКИ НА ЗАБЕГИ
     # ============================================
 
@@ -448,6 +996,39 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid
 
+    async def submit_feedback(
+        self,
+        telegram_id: int,
+        text: str,
+        runner_id: Optional[int] = None,
+    ) -> int:
+        """Сохранить обратную связь от пользователя"""
+        cursor = await self.db.execute(
+            """
+            INSERT INTO feedback (runner_id, telegram_id, text)
+            VALUES (?, ?, ?)
+            """,
+            (runner_id, telegram_id, text)
+        )
+        await self.db.commit()
+        return cursor.lastrowid
+
+    async def get_feedback_list(self, limit: int = 20) -> List[Dict]:
+        """Получить последние сообщения обратной связи"""
+        async with self.db.execute(
+            """
+            SELECT f.id, f.telegram_id, f.text, f.created_at,
+                   r.first_name, r.last_name
+            FROM feedback f
+            LEFT JOIN runners r ON f.runner_id = r.id
+            ORDER BY f.created_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
     # ============================================
     # УДАЛЕНИЕ ДАННЫХ
     # ============================================
@@ -474,6 +1055,192 @@ class Database:
         
         await self.db.commit()
         return True
+    
+    async def delete_race(self, race_id: int) -> Dict[str, int]:
+        """
+        Удалить забег и все связанные данные (по запросу организатора)
+        
+        Returns:
+            Словарь со статистикой удаления
+        """
+        stats = {
+            'results_deleted': 0,
+            'subscriptions_deleted': 0
+        }
+        
+        # Подсчёт удаляемых результатов
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM results WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['results_deleted'] = row[0] if row else 0
+        
+        # Подсчёт удаляемых подписок
+        async with self.db.execute(
+            "SELECT COUNT(*) FROM race_subscriptions WHERE race_id = ?",
+            (race_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['subscriptions_deleted'] = row[0] if row else 0
+        
+        # Удаляем результаты
+        await self.db.execute(
+            "DELETE FROM results WHERE race_id = ?",
+            (race_id,)
+        )
+        
+        # Удаляем подписки
+        await self.db.execute(
+            "DELETE FROM race_subscriptions WHERE race_id = ?",
+            (race_id,)
+        )
+        
+        # Удаляем забег
+        await self.db.execute(
+            "DELETE FROM races WHERE id = ?",
+            (race_id,)
+        )
+        
+        await self.db.commit()
+        return stats
+    
+    async def delete_races_by_organizer(self, organizer: str) -> Dict[str, int]:
+        """
+        Удалить все забеги организатора (по запросу организатора)
+        
+        Returns:
+            Словарь со статистикой удаления
+        """
+        stats = {
+            'races_deleted': 0,
+            'results_deleted': 0,
+            'subscriptions_deleted': 0
+        }
+        
+        # Получаем все ID забегов организатора
+        async with self.db.execute(
+            "SELECT id FROM races WHERE organizer = ?",
+            (organizer,)
+        ) as cursor:
+            race_ids = [row[0] for row in await cursor.fetchall()]
+        
+        stats['races_deleted'] = len(race_ids)
+        
+        if not race_ids:
+            return stats
+        
+        # Подсчёт результатов
+        placeholders = ','.join('?' * len(race_ids))
+        async with self.db.execute(
+            f"SELECT COUNT(*) FROM results WHERE race_id IN ({placeholders})",
+            race_ids
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['results_deleted'] = row[0] if row else 0
+        
+        # Подсчёт подписок
+        async with self.db.execute(
+            f"SELECT COUNT(*) FROM race_subscriptions WHERE race_id IN ({placeholders})",
+            race_ids
+        ) as cursor:
+            row = await cursor.fetchone()
+            stats['subscriptions_deleted'] = row[0] if row else 0
+        
+        # Удаляем результаты
+        await self.db.execute(
+            f"DELETE FROM results WHERE race_id IN ({placeholders})",
+            race_ids
+        )
+        
+        # Удаляем подписки
+        await self.db.execute(
+            f"DELETE FROM race_subscriptions WHERE race_id IN ({placeholders})",
+            race_ids
+        )
+        
+        # Удаляем забеги
+        await self.db.execute(
+            "DELETE FROM races WHERE organizer = ?",
+            (organizer,)
+        )
+        
+        await self.db.commit()
+        return stats
+
+    # ============================================
+    # ОРГАНИЗАТОРЫ (organizers)
+    # См. docs/ORGANIZERS.md
+    # ============================================
+
+    async def get_organizer_by_canonical_name(
+        self, canonical_name: str
+    ) -> Optional[Dict]:
+        """Получить организатора по каноническому имени"""
+        async with self.db.execute(
+            "SELECT * FROM organizers WHERE canonical_name = ?",
+            (canonical_name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_races_by_organizer(self, organizer_name: str) -> List[Dict]:
+        """Получить забеги организатора (по строке organizer) — для сценария привязки"""
+        async with self.db.execute(
+            """
+            SELECT r.*, COUNT(res.id) as results_count
+            FROM races r
+            LEFT JOIN results res ON r.id = res.race_id
+            WHERE r.organizer = ? AND r.is_active = 1
+            GROUP BY r.id
+            ORDER BY r.date DESC
+            """,
+            (organizer_name,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def create_organizer(
+        self,
+        canonical_name: str,
+        display_name: str = '',
+        website: str = '',
+        contact_telegram: str = '',
+        contact_email: str = '',
+    ) -> int:
+        """Создать организатора"""
+        display_name = display_name or canonical_name
+        await self.db.execute(
+            """
+            INSERT INTO organizers (canonical_name, display_name, website, contact_telegram, contact_email, status)
+            VALUES (?, ?, ?, ?, ?, 'active')
+            ON CONFLICT(canonical_name) DO UPDATE SET
+                display_name = excluded.display_name,
+                website = excluded.website,
+                contact_telegram = excluded.contact_telegram,
+                contact_email = excluded.contact_email,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (canonical_name, display_name, website, contact_telegram, contact_email)
+        )
+        await self.db.commit()
+        org = await self.get_organizer_by_canonical_name(canonical_name)
+        return org['id'] if org else 0
+
+    async def link_races_to_organizer(
+        self, organizer_name: str, organizer_id: int
+    ) -> int:
+        """
+        Привязать все забеги с organizer=organizer_name к organizer_id.
+        Используется при регистрации организатора.
+        Returns: количество обновлённых забегов
+        """
+        result = await self.db.execute(
+            "UPDATE races SET organizer_id = ? WHERE organizer = ?",
+            (organizer_id, organizer_name)
+        )
+        await self.db.commit()
+        return result.rowcount
 
 
 # Глобальный экземпляр

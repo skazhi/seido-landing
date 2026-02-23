@@ -1,0 +1,141 @@
+# Организаторы забегов России — справочник
+
+Список популярных организаторов беговых мероприятий в России. Используется для:
+- сбора результатов забегов
+- приглашения в сервис Seido в качестве партнёров
+- привязки данных при регистрации организатора
+
+**Важно:** каноническое имя (`canonical_name`) — единый идентификатор организатора в БД. При добавлении забегов используйте именно его.
+
+---
+
+## Канонические имена организаторов
+
+| # | canonical_name | Сайт | Города | Примечания |
+|---|----------------|------|--------|------------|
+| 1 | 5верст | [5verst.ru](https://5verst.ru) | Москва, СПб, 100+ локаций | Бесплатные субботние 5 км, parkrun-формат |
+| 2 | S95 | [s95.ru](https://s95.ru) | 20+ городов РФ | Sat 9am 5km, еженедельные забеги |
+| 3 | RussiaRunning | [russiarunning.com](https://russiarunning.com) | Москва, СПб, Ярославль, Золотое кольцо, Воркута | Моя столица, Золотое кольцо, Арктический марафон |
+| 4 | Юнистар (Unistar) | [runc.run](https://runc.run) | Москва, СПб, Казань | Московский марафон, Белые ночи, Лига БРИКС |
+| 5 | TIMERMAN | [kazan.run](https://kazan.run), [timerman.org](https://timerman.org) | Казань, Татарстан | Казанский марафон (35k+ участников) |
+| 6 | RHR | [goldenultra.ru](https://goldenultra.ru) | Москва, регионы | Running Heroes Russia, ультратрейлы |
+| 7 | IronStar | [iron-star.com](https://iron-star.com) | Москва, Сочи, Анапа, Египет | Триатлон + бег |
+| 8 | MyRace | [myrace.ru](https://myrace.ru) | Разные регионы | Регистрация и результаты |
+| 9 | CronoSport | [cronosport.ru](https://cronosport.ru) | — | Хронометраж (используют организаторы) |
+| 10 | Orgeo | [orgeo.ru](https://orgeo.ru) | — | Платформа заявок и результатов |
+| 11 | RUNUP | [runup.team](https://runup.team) | Регионы | Информационный портал + мероприятия |
+| 12 | I Love Running | [iloverunning.ru](https://iloverunning.ru) | Москва, СПб | Серия забегов |
+| 13 | ПроБЕГ | [probeg.org](https://probeg.org) | — | Календарь и база (не организатор, агрегатор) |
+| 14 | Федерация лёгкой атлетики | [rusathletics.com](https://rusathletics.com) | Вся РФ | Чемпионаты, соревнования ФЛА |
+| 15 | Марафон «Белые ночи» | [whitenightsmarathon.ru](https://whitenightsmarathon.ru) | СПб | Организатор: Юнистар |
+| 16 | Московский марафон | [moscowmarathon.runc.run](https://moscowmarathon.runc.run) | Москва | Организатор: Юнистар |
+| 17 | STsport timing | [stsport.ru](https://stsport.ru) | — | Хронометраж (используют организаторы) |
+| 18 | Run Crimea | — | Крым | Региональные забеги |
+| 19 | Уральский марафон | — | Екатеринбург | Региональный марафон |
+| 20 | Run Krasnodar | — | Краснодар | Региональные забеги |
+| 21 | Wild Trail | [wildtrail.ru](https://wildtrail.ru) | Москва, Архыз, Сочи, Дагестан | Трейл, ультра |
+| 22 | Open Band | [openband.run](https://openband.run) | Московская область | Open Band Trails, трейл-серия |
+| 23 | Высшая лига | [topliga.ru](https://topliga.ru), [events.topliga.ru](https://events.topliga.ru) | Юг РФ, Сочи | Забеги, велогонки, марафоны |
+| 24 | Dream Trail | [dtrail.ru](https://dtrail.ru) | Лысково, Химки | Трейл (Lyskovo, Khimki Forest) |
+| 25 | TulaMarathon | [tulamarathon.org](https://tulamarathon.org) | Тула | Серия забегов, полумарафоны |
+| 26 | reg.o-time.ru | [reg.o-time.ru](https://reg.o-time.ru) | — | Агрегатор регистраций |
+
+---
+
+## Детали для сбора результатов (2026 и далее)
+
+### 1. 5верст
+- **Результаты:** https://5verst.ru/{локация}/results/latest/
+- **Формат:** веб-страницы, возможно JSON/API
+- **Парсер:** нужен отдельный (структура по локациям)
+
+### 2. S95
+- **Результаты:** https://s95.ru/activities
+- **Формат:** веб-страницы с результатами
+- **Парсер:** нужен
+
+### 3. RussiaRunning
+- **API:** https://russiarunning.com/api/events/list/ru
+- **Результаты:** отдельные страницы забегов (пока парсинг результатов недоступен)
+- **Парсер:** есть (`russiarunning.py`)
+
+### 4. Юнистар (Московский марафон, Белые ночи)
+- **Москва:** moscowmarathon.runc.run
+- **СПб:** whitenightsmarathon.ru / events.spbu.ru
+- **Результаты:** обычно PDF/Excel на сайтах
+
+### 5. TIMERMAN (Казанский марафон)
+- **Сайт:** kazan.run, timerman.org
+- **Результаты:** публикуются на сайте после забега
+
+### 6. RHR (Running Heroes Russia)
+- **Сайт:** goldenultra.ru
+- **Результаты:** на сайте, ITRA
+
+### 7. IronStar
+- **Результаты:** на сайте iron-star.com по каждому событию
+
+### 8. Orgeo
+- **Результаты:** orgeo.ru/live — онлайн, API возможен
+- **Много организаторов** используют Orgeo для публикации
+
+### 9. CronoSport
+- **Результаты:** на сайтах организаторов, CronoSport — подрядчик хронометража
+
+---
+
+## Подготовка к приглашению организаторов
+
+При регистрации организатора в Seido важно, чтобы он мог быстро **подтянуться к своим данным**.
+
+### Рекомендуемая схема
+
+1. **Таблица `organizers`** (для будущего):
+   - `id`, `canonical_name`, `display_name`, `website`, `contact`, `telegram`, `seido_user_id` (когда зарегистрируется), `status`
+
+2. **Поле `organizer` в `races`** — строковое, используется для поиска и привязки:
+   - При регистрации организатор указывает своё каноническое имя
+   - Система находит все забеги с `organizer = canonical_name` и связывает с `organizers.id`
+
+3. **Процесс "подхвата" данных при регистрации:**
+   - Организатор при регистрации выбирает или вводит свой `canonical_name`
+   - Мы показываем: "Найдено N забегов и M результатов — связать с вашим аккаунтом?"
+   - Организатор подтверждает → все `races.organizer_id` обновляются
+
+4. **Маппинг вариаций имён** (уже есть в `parsers/base.py`):
+   - "5verst", "5 верст" → "5верст"
+   - "moscow marathon" → "Московский марафон"
+   - При ручном добавлении забега — выбирать из списка канонических имён
+
+### Файлы для синхронизации
+- `docs/ORGANIZERS.md` — этот справочник
+- `bot/parsers/base.py` — `detect_organizer()` (должен совпадать с canonical_name)
+- `bot/db.py` — при добавлении таблицы organizers
+
+---
+
+## План сбора результатов 2026
+
+| Организатор | Источник | Статус |
+|-------------|----------|--------|
+| 5верст | 5verst.ru | Расширить collect_protocols |
+| S95 | s95.ru | Добавить парсер |
+| RussiaRunning | API + страницы забегов | Расширить для результатов |
+| Юнистар | runc.run, сайты марафонов | Добавить сбор протоколов |
+| TIMERMAN | kazan.run | Добавить сбор протоколов |
+| RHR | goldenultra.ru | Добавить парсер |
+| Wild Trail | wildtrail.ru | Добавить |
+| Open Band | openband.run | Добавить |
+| Высшая лига | topliga.ru | Добавить |
+| Dream Trail | dtrail.ru | Добавить |
+| TulaMarathon | tulamarathon.org | Добавить |
+| IronStar | iron-star.com | ✅ Есть |
+| Orgeo | orgeo.ru | Исследовать API |
+
+---
+
+## Контакты для приглашений
+
+При рассылке приглашений организаторам использовать:
+- Шаблон: `docs/organizer_letter.md`
+- Политика: `docs/organizer_policy.md`
