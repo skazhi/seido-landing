@@ -466,6 +466,17 @@ class Database:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+    async def get_race_by_name_date(self, name: str, date_str: str) -> Optional[Dict]:
+        """Получить забег по названию и дате (для проверки дубликата)"""
+        if not name or not date_str:
+            return None
+        async with self.db.execute(
+            "SELECT * FROM races WHERE name = ? AND date = ?",
+            (name.strip(), date_str)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     async def get_race_results(
         self, race_id: int, limit: int = 30, offset: int = 0
     ) -> tuple[List[Dict], int]:

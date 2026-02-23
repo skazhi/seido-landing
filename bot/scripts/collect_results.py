@@ -140,8 +140,8 @@ async def run_collect(
         if "results.russiarunning.com" in url and exclude_rr_5verst_s95:
             continue
         if "results.russiarunning.com" in url:
-            if rr_processed >= RR_LIMIT:
-                logger.info(f"  Пропуск (достигнут лимит {RR_LIMIT} RR за прогон)")
+            if rr_processed >= rr_limit:
+                logger.info(f"  Пропуск RR (лимит {rr_limit})")
                 continue
             try:
                 from bot.scripts.rr_results_parser import fetch_rr_results
@@ -198,8 +198,8 @@ async def run_collect(
 
         # RaceResult (my.raceresult.com) — парсим через Playwright
         if "my.raceresult.com" in url:
-            if raceresult_processed >= RACERESULT_LIMIT:
-                logger.info(f"  Пропуск RaceResult (достигнут лимит {RACERESULT_LIMIT})")
+            if raceresult_processed >= raceresult_limit:
+                logger.info(f"  Пропуск RaceResult (лимит {raceresult_limit})")
                 continue
             try:
                 from bot.scripts.raceresult_parser import fetch_raceresult_results
