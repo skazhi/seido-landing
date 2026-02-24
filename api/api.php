@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'u3426357_seido');        // Измени на своё имя БД
 define('DB_USER', 'u3426357_Skazhi');   // Измени на своего пользователя
-define('DB_PASS', 'fS9eO6gL2rbB5uM5'); // Измени на свой пароль
+define('DB_PASS', 'EhmN083fA1108nv1!'); // Измени на свой пароль
 define('DB_CHARSET', 'utf8mb4');
 
 // Подключение к БД
@@ -34,8 +34,14 @@ function getDbConnection() {
         ];
         return new PDO($dsn, DB_USER, DB_PASS, $options);
     } catch (PDOException $e) {
-        http_response_code(500);
-        return json_encode(['error' => 'Database connection failed', 'message' => $e->getMessage()]);
+        jsonResponse([
+            'error' => 'Database connection failed',
+            'message' => $e->getMessage(),
+            'host' => DB_HOST,
+            'database' => DB_NAME,
+            'user' => DB_USER
+        ], 500);
+        return null;
     }
 }
 
@@ -275,12 +281,12 @@ function getClub($pdo, $id) {
 // Основной роутер
 try {
     $pdo = getDbConnection();
-    if (is_string($pdo)) {
-        echo $pdo;
+    if (!$pdo) {
+        // Ошибка подключения уже обработана в getDbConnection()
         exit();
     }
 } catch (Exception $e) {
-    jsonResponse(['error' => 'Database connection failed'], 500);
+    jsonResponse(['error' => 'Database connection failed', 'message' => $e->getMessage()], 500);
 }
 
 $action = getParam('action', '');
