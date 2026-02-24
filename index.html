@@ -488,6 +488,7 @@
                 <li><a href="#problems">Проблемы</a></li>
                 <li><a href="#solutions">Решения</a></li>
                 <li><a href="#mvp">MVP</a></li>
+                <li><a href="#upcoming-races-section">Забеги</a></li>
                 <li><a href="#roadmap">Roadmap</a></li>
                 <li><a href="#contacts">Контакты</a></li>
             </ul>
@@ -851,6 +852,24 @@
         </div>
     </section>
 
+    <!-- Предстоящие забеги -->
+    <section class="section" id="upcoming-races-section">
+        <h2 class="section-title">Предстоящие забеги</h2>
+        <p class="section-subtitle">
+            Найди свой следующий старт — все забеги России в одном календаре
+        </p>
+        <div class="card-grid" id="upcoming-races-container">
+            <div class="fade-in" style="text-align: center; grid-column: 1/-1; padding: 40px; color: var(--text-muted);">
+                Загрузка забегов...
+            </div>
+        </div>
+        <div style="text-align: center; margin-top: 40px;">
+            <a href="https://t.me/SeidocommunityBot" class="btn btn-primary" target="_blank">
+                📅 Смотреть весь календарь в боте
+            </a>
+        </div>
+    </section>
+
     <!-- Контакты -->
     <section class="section" id="contacts">
         <h2 class="section-title">Контакты</h2>
@@ -886,6 +905,11 @@
     </footer>
 
     <script>
+        // ============================================
+        // КОНФИГУРАЦИЯ API
+        // ============================================
+        const API_BASE = 'api/api.php';
+        
         // Плавный скролл для якорных ссылок
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function (e) {
@@ -920,6 +944,136 @@
             el.style.transform = 'translateY(30px)';
             el.style.transition = 'opacity 0.8s ease-out, transform 0.8s ease-out';
             observer.observe(el);
+        });
+
+        // ============================================
+        // ЗАГРУЗКА ПРЕДСТОЯЩИХ ЗАБЕГОВ
+        // ============================================
+        
+        // Форматирование даты
+        function formatDate(dateString) {
+            if (!dateString) return '—';
+            const date = new Date(dateString);
+            return date.toLocaleDateString('ru-RU', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+            });
+        }
+
+        // Форматирование дистанций
+        function formatDistances(distances) {
+            if (!distances) return '—';
+            if (typeof distances === 'string') {
+                try {
+                    distances = JSON.parse(distances);
+                } catch (e) {
+                    return distances;
+                }
+            }
+            if (Array.isArray(distances)) {
+                return distances.map(d => d.name || d).join(', ') || '—';
+            }
+            return '—';
+        }
+
+        // Создание карточки забега
+        function createRaceCard(race) {
+            const distances = formatDistances(race.distances);
+            const date = formatDate(race.date);
+            
+            return `
+                <div class="card fade-in">
+                    <div class="card-icon">🏃‍♂️</div>
+                    <h3 class="card-title">${race.name || 'Без названия'}</h3>
+                    <p class="card-text" style="margin-bottom: 10px;">
+                        <strong style="color: var(--tiffany-light);">📅 ${date}</strong>
+                    </p>
+                    ${race.location ? `
+                        <p class="card-text" style="margin-bottom: 10px;">
+                            📍 ${race.location}
+                        </p>
+                    ` : ''}
+                    ${race.organizer ? `
+                        <p class="card-text" style="margin-bottom: 10px;">
+                            🏢 ${race.organizer}
+                        </p>
+                    ` : ''}
+                    ${distances !== '—' ? `
+                        <p class="card-text" style="margin-bottom: 15px;">
+                            🏷️ ${distances}
+                        </p>
+                    ` : ''}
+                    ${race.website_url ? `
+                        <a href="${race.website_url}" target="_blank" class="btn btn-secondary" style="padding: 10px 20px; font-size: 0.9rem; margin-top: 10px; display: inline-block;">
+                            Сайт забега →
+                        </a>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        // Загрузка предстоящих забегов
+        async function loadUpcomingRaces() {
+            try {
+                const container = document.getElementById('upcoming-races-container');
+                if (!container) {
+                    console.error('Контейнер забегов не найден');
+                    return;
+                }
+
+                const url = API_BASE + '?action=races_upcoming';
+                console.log('Загрузка предстоящих забегов:', url);
+                
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Данные предстоящих забегов:', data);
+                
+                if (data.status === 'ok' && data.data && data.data.length > 0) {
+                    container.innerHTML = data.data.map(race => createRaceCard(race)).join('');
+                    
+                    // Применяем анимацию к новым карточкам
+                    container.querySelectorAll('.fade-in').forEach(el => {
+                        el.style.opacity = '0';
+                        el.style.transform = 'translateY(30px)';
+                        el.style.transition = 'opacity 0.8s ease-out, transform 0.8s ease-out';
+                        observer.observe(el);
+                    });
+                } else {
+                    container.innerHTML = `
+                        <div class="fade-in" style="text-align: center; grid-column: 1/-1; padding: 40px; color: var(--text-muted);">
+                            <p style="font-size: 1.1rem; margin-bottom: 10px;">Забегов пока нет</p>
+                            <p>Следи за обновлениями в нашем Telegram-канале</p>
+                            <a href="https://t.me/SeidocommunityBot" class="btn btn-primary" target="_blank" style="margin-top: 20px; display: inline-block;">
+                                🤖 Открыть бота
+                            </a>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки предстоящих забегов:', error);
+                const container = document.getElementById('upcoming-races-container');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="fade-in" style="text-align: center; grid-column: 1/-1; padding: 40px; color: var(--text-muted);">
+                            <p style="color: #ff6b6b; margin-bottom: 10px;">❌ Не удалось загрузить забеги</p>
+                            <p style="font-size: 0.9rem;">Ошибка: ${error.message}</p>
+                            <p style="font-size: 0.9rem; margin-top: 10px;">Проверьте консоль браузера (F12) для подробностей</p>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // Загрузка при старте
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Загрузка предстоящих забегов...');
+            loadUpcomingRaces();
         });
     </script>
 </body>

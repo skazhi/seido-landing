@@ -80,13 +80,27 @@ function apiInfo() {
 // Предстоящие забеги
 function getUpcomingRaces($pdo) {
     try {
-        $stmt = $pdo->query("SELECT * FROM races WHERE date >= CURDATE() ORDER BY date ASC LIMIT 50");
+        // Получаем все предстоящие забеги (сегодня и позже), только активные
+        $stmt = $pdo->query("
+            SELECT * 
+            FROM races 
+            WHERE date >= CURDATE() 
+            AND is_active = 1 
+            ORDER BY date ASC, name ASC 
+            LIMIT 100
+        ");
         $races = $stmt->fetchAll();
         
         // Декодируем JSON поля
         foreach ($races as &$race) {
             if ($race['distances']) {
                 $race['distances'] = json_decode($race['distances'], true);
+            }
+            // Форматируем дату для удобства
+            if ($race['date']) {
+                $dateObj = new DateTime($race['date']);
+                $race['date_formatted'] = $dateObj->format('d.m.Y');
+                $race['date_iso'] = $race['date'];
             }
         }
         
